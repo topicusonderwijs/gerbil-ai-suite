@@ -1,0 +1,20 @@
+{
+  "name": "gerbil-ai-suite",
+  "version": "1.0.0",
+  "description": "A suite of Model Context Protocol (MCP) servers for AI-related work using Docker",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/gerbil_ai_suite"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "ai",
+    "grafana",
+    "docker",
+    "devcontainer"
+  ],
+  "author": "",
+  "license": "MIT"
+}

@@ -1,0 +1,20 @@
+{
+  "servers": {
+    "grafana": {
+      "type": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "GRAFANA_URL=https://your-grafana-instance.com/",
+        "-e",
+        "GRAFANA_SERVICE_ACCOUNT_TOKEN=your-service-account-token-here",
+        "mcp/grafana",
+        "-t",
+        "stdio"
+      ]
+    }
+  }
+}p

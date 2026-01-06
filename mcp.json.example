@@ -15,6 +15,18 @@
         "-t",
         "stdio"
       ]
+    },
+    "smartbear": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@smartbear/mcp@latest"
+      ],
+      "env": {
+        "BUGSNAG_AUTH_TOKEN": "your-bugsnag-auth-token-here",
+        "BUGSNAG_PROJECT_API_KEY": "your-bugsnag-project-api-key-here-or-leave-empty"
+      }
     }
   }
-}p
+}

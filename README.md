@@ -9,6 +9,7 @@ A suite of Model Context Protocol (MCP) servers for AI-related work in VS Code. 
 - Docker installed and running
 - VS Code with Dev Containers extension
 - Git
+- Node.js 20+ (automatically installed in devcontainer)
 
 ### Setup
 
@@ -28,16 +29,18 @@ A suite of Model Context Protocol (MCP) servers for AI-related work in VS Code. 
 4. The setup script will automatically prompt you for:
    - Grafana URL (e.g., `https://your-grafana.com`)
    - Grafana Service Account Token
+   - Bugsnag Auth Token
+   - Bugsnag Project API Key (optional)
 
-5. The script tests the connection and creates a `.env` file on your host
+5. The script tests the connections and creates a `.env` file on your host
 
-6. The devcontainer pulls the official Grafana MCP Docker image
+6. The devcontainer pulls the Grafana Docker image and installs SmartBear MCP NPM package
 
-7. The MCP server is automatically configured in `~/.vscode-server/data/User/mcp.json`
+7. The MCP servers are automatically configured in `~/.vscode-server/data/User/mcp.json`
 
 8. After setup completes, **reload VS Code window** (`Ctrl+Shift+P` → `Developer: Reload Window`)
 
-9. The Grafana MCP is now available in GitHub Copilot across all workspaces!
+9. The Grafana and Bugsnag (SmartBear) MCP servers are now available in GitHub Copilot across all workspaces!
 
 ## 📦 MCP Servers
 
@@ -55,6 +58,23 @@ Official [Grafana MCP server](https://github.com/grafana/mcp-grafana) providing 
 - View datasource configurations
 
 See the [official documentation](https://github.com/grafana/mcp-grafana) for a complete list of 50+ available tools.
+
+### Bugsnag MCP (SmartBear)
+
+Official [SmartBear MCP server](https://developer.smartbear.com/smartbear-mcp/docs/bugsnag-integration) providing access to Bugsnag error monitoring and stability management. Runs via NPM/npx for easy deployment.
+
+**Capabilities:**
+- List and search projects across your organization
+- Retrieve detailed error information and stack traces
+- View error trends, occurrences, and statistics
+- Access project stability scores and health metrics
+- Query error groups with filtering by release, environment, and time
+- Analyze error patterns and frequencies
+- Track error resolution status and assignments
+
+**Multi-Product Support:** The SmartBear MCP server is designed to work with multiple SmartBear products including Bugsnag, Reflect, Swagger, and Qmetry from a single integration point.
+
+See the [official documentation](https://developer.smartbear.com/smartbear-mcp/docs) for complete details.
 
 ## 🏗️ Project Structure
 
@@ -98,14 +118,17 @@ The MCP server is configured in `~/.vscode-server/data/User/mcp.json`, which:
 ## 🔒 Security
 
 - Never commit `.env` files (gitignored by default)
-- MCP runs in read-only mode (`--disable-write`)
-- Use read-only service accounts with minimal permissions
-- Regularly rotate service account tokens
+- Use read-only service accounts with minimal permissions for Grafana
+- Use Personal Auth Tokens with appropriate scopes for Bugsnag (read-only recommended)
+- Regularly rotate service account tokens and API keys
 - Review MCP server logs for unexpected access patterns
+- The Bugsnag Project API Key is optional and can be used to scope access to a single project
 
 ## 🛠️ Configuration
 
 ### Service Account Setup
+
+#### Grafana
 
 1. Navigate to **Administration** → **Service accounts** in Grafana
 2. Click **Add service account**
@@ -113,6 +136,15 @@ The MCP server is configured in `~/.vscode-server/data/User/mcp.json`, which:
 4. Click **Create**
 5. Click **Add service account token**
 6. Copy the token - you'll use this during setup
+
+#### Bugsnag (SmartBear MCP)
+
+1. Log in to your Bugsnag account at [app.bugsnag.com](https://app.bugsnag.com)
+2. Navigate to **Settings** → **Personal Auth Tokens**
+3. Click **Generate new token**
+4. Give it a descriptive name (e.g., "MCP Server Access")
+5. Copy the auth token - you'll use this during setup
+6. (Optional) To scope to a single project, find the **Project API Key** in project settings
 
 ### Folder Permissions (Optional)
 
@@ -135,6 +167,7 @@ To add more MCP servers to the suite:
 
 When connected to GitHub Copilot:
 
+**Grafana:**
 ```
 User: Show me all dashboards in the Production folder
 AI: [Uses search_dashboards tool]
@@ -144,6 +177,18 @@ AI: [Uses query_loki tool with appropriate LogQL]
 
 User: What are the current alert rules?
 AI: [Uses list_alert_rules tool]
+```
+
+**Bugsnag:**
+```
+User: Show me the most recent errors in the mobile app project
+AI: [Uses list_errors tool with project filter]
+
+User: What's the stability score for the API project?
+AI: [Uses get_project_details tool]
+
+User: Show me all errors that happened in the last 24 hours in production
+AI: [Uses list_errors tool with environment and time filters]
 ```
 
 ## 🐛 Troubleshooting
@@ -157,9 +202,16 @@ AI: [Uses list_alert_rules tool]
 
 ### Connection Test Fails
 
+**Grafana:**
 - Verify `GRAFANA_URL` is correct and accessible
 - Check service account token hasn't expired
 - Ensure service account has at least Viewer role
+
+**Bugsnag:**
+- Verify `BUGSNAG_AUTH_TOKEN` is correct
+- Check the auth token hasn't been revoked at app.bugsnag.com
+- Ensure you have access to at least one organization
+- If using `BUGSNAG_PROJECT_API_KEY`, verify it's valid for your account
 
 ### MCP Not Showing in Copilot
 
@@ -172,12 +224,13 @@ AI: [Uses list_alert_rules tool]
 
 - Ensure Docker is running
 - Verify your user has Docker permissions
-- Try `docker pull mcp/grafana` manually
+- Try pulling images manually: `docker pull mcp/grafana` and `docker pull mcp/bugsnag`
 
 ## 📚 Resources
 
 - [Model Context Protocol](https://modelcontextprotocol.io/)
 - [Grafana MCP Server](https://github.com/grafana/mcp-grafana)
+- [Bugsnag MCP Server](https://developer.smartbear.com/smartbear-mcp/docs/bugsnag-integration)
 - [VS Code Dev Containers](https://code.visualstudio.com/docs/devcontainers/containers)
 - [GitHub Copilot](https://github.com/features/copilot)
 

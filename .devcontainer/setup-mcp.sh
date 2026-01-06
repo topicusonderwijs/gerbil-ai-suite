@@ -17,6 +17,8 @@ if [ ! -f "$ENV_FILE" ]; then
     echo "   MCP server will be configured but credentials will be empty."
     GRAFANA_URL=""
     GRAFANA_SERVICE_ACCOUNT_TOKEN=""
+    BUGSNAG_AUTH_TOKEN=""
+    BUGSNAG_PROJECT_API_KEY=""
 else
     source "$ENV_FILE"
     echo "✅ Loaded credentials from .env"
@@ -35,6 +37,7 @@ if [ -f "$MCP_FILE" ]; then
     # Use jq to merge the Grafana server configuration
     if command -v jq &> /dev/null; then
         jq --arg url "$GRAFANA_URL" --arg token "$GRAFANA_SERVICE_ACCOUNT_TOKEN" \
+           --arg bugsnag_token "$BUGSNAG_AUTH_TOKEN" --arg bugsnag_project "$BUGSNAG_PROJECT_API_KEY" \
         '.servers.grafana = {
             "type": "stdio",
             "command": "docker",
@@ -50,6 +53,17 @@ if [ -f "$MCP_FILE" ]; then
                 "-t",
                 "stdio"
             ]
+        } | .servers.smartbear = {
+            "type": "stdio",
+            "command": "npx",
+            "args": [
+                "-y",
+                "@smartbear/mcp@latest"
+            ],
+            "env": {
+                "BUGSNAG_AUTH_TOKEN": $bugsnag_token,
+                "BUGSNAG_PROJECT_API_KEY": $bugsnag_project
+            }
         }' "$MCP_FILE" > "$MCP_FILE.tmp" && mv "$MCP_FILE.tmp" "$MCP_FILE"
         echo "✅ mcp.json updated successfully"
     else
@@ -72,6 +86,18 @@ if [ -f "$MCP_FILE" ]; then
                 "-t",
                 "stdio"
             ]
+        },
+        "smartbear": {
+            "type": "stdio",
+            "command": "npx",
+            "args": [
+                "-y",
+                "@smartbear/mcp@latest"
+            ],
+            "env": {
+                "BUGSNAG_AUTH_TOKEN": "$BUGSNAG_AUTH_TOKEN",
+                "BUGSNAG_PROJECT_API_KEY": "$BUGSNAG_PROJECT_API_KEY"
+            }
         }
     }
 }
@@ -99,6 +125,18 @@ else
                 "-t",
                 "stdio"
             ]
+        },
+        "smartbear": {
+            "type": "stdio",
+            "command": "npx",
+            "args": [
+                "-y",
+                "@smartbear/mcp@latest"
+            ],
+            "env": {
+                "BUGSNAG_AUTH_TOKEN": "$BUGSNAG_AUTH_TOKEN",
+                "BUGSNAG_PROJECT_API_KEY": "$BUGSNAG_PROJECT_API_KEY"
+            }
         }
     }
 }

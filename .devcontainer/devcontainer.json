@@ -7,6 +7,9 @@
     "ghcr.io/devcontainers/features/python:1": {
       "version": "latest"
     },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "20"
+    },
     "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
       "version": "latest",
       "moby": true
@@ -21,7 +24,7 @@
 
   "initializeCommand": "bash .devcontainer/setup-env.sh || (echo 'Setup failed. Creating empty .env...' && touch .env)",
 
-  "postCreateCommand": "docker pull mcp/grafana && bash .devcontainer/setup-mcp.sh",
+  "postCreateCommand": "docker pull mcp/grafana && npm install -g @smartbear/mcp && bash .devcontainer/setup-mcp.sh",
 
   "mounts": [
     "source=${localWorkspaceFolder}/.env,target=${containerWorkspaceFolder}/.env,type=bind,consistency=cached"

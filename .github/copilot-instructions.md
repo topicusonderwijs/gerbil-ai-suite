@@ -187,3 +187,66 @@ bash .devcontainer/setup-env.sh  # Interactive credential setup
 bash .devcontainer/setup-mcp.sh  # Reconfigure MCP servers
 ```
 Then reload VS Code window.
+
+## Git Commit Conventions
+
+Use **semantic commit messages** following the [Conventional Commits](https://www.conventionalcommits.org/) specification:
+
+### Format
+```
+<type>(<scope>): <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+### Types
+| Type | Description |
+|------|-------------|
+| `feat` | A new feature |
+| `fix` | A bug fix |
+| `docs` | Documentation only changes |
+| `style` | Changes that don't affect meaning (formatting, whitespace) |
+| `refactor` | Code change that neither fixes a bug nor adds a feature |
+| `perf` | Performance improvement |
+| `test` | Adding or correcting tests |
+| `build` | Changes to build system or dependencies |
+| `ci` | Changes to CI configuration |
+| `chore` | Other changes that don't modify src or test files |
+| `revert` | Reverts a previous commit |
+
+### Scopes (Project-specific)
+| Scope | Description |
+|-------|-------------|
+| `reports` | Changes to report templates or generated reports |
+| `postmortem` | Postmortem-related changes |
+| `release` | Release report-related changes |
+| `mcp` | MCP server configuration |
+| `grafana` | Grafana queries or dashboard references |
+| `bugsnag` | Bugsnag integration |
+| `agents` | Copilot agent configurations |
+| `devcontainer` | Development container setup |
+
+### Examples
+```bash
+# New postmortem report
+docs(postmortem): add JEE10 ws-rest incident analysis 2026-01-15
+
+# Update copilot instructions
+docs(agents): add semantic commit conventions
+
+# Fix MCP configuration
+fix(mcp): correct Grafana datasource UID
+
+# New feature in report generation
+feat(reports): add cascade failure diagram template
+```
+
+### Breaking Changes
+Indicate breaking changes with `!` after the type/scope or in the footer:
+```bash
+feat(mcp)!: migrate to MCP v2 protocol
+
+BREAKING CHANGE: requires updated mcp.json configuration
+```

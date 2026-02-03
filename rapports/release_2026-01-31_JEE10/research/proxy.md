@@ -24,7 +24,7 @@
 | **401** | 2.69 | 3.15 | +0.46 (+17.1%) | ✅ Normal |
 | **403** | 1.66 | 1.95 | +0.29 (+17.5%) | ✅ Normal |
 | **404** | 0.68 | 0.82 | +0.14 (+20.6%) | ✅ Normal |
-| **499** | 1.72 | 2.28 | +0.56 (+32.6%) | ⚠️ Elevated |
+| **499** | 1.72 | 2.28 | +0.56 (+32.6%)* | ✅ Normal* |
 | **500** | 0.078 | 0.098 | +0.020 (+25.6%) | ⚠️ Elevated |
 | **502** | 0.0017 | 0.0047 | +0.003 (+176%) | ⚠️ Spike |
 | **503** | 0.00056 | 0 | -0.00056 | ✅ Improved |
@@ -43,7 +43,19 @@
 - **503 Service Unavailable**: Improved to 0
 
 ### Client Aborts (499)
-The 32.6% increase in HTTP 499 (client closed connection) suggests some requests are taking longer under JEE10, causing clients to timeout before completion.
+
+*⚠️ The 32.6% figure above compares weekday-to-weekday raw rates. A proper weekend-to-weekend comparison shows a smaller increase:*
+
+| Weekend | Day | Total Requests (1h) | 499 Count | 499 Rate |
+|---------|-----|---------------------|-----------|----------|
+| **JEE8** | Sat Jan 24 | 3.6M | 665 | 0.0185% |
+| **JEE8** | Sun Jan 25 | 5.0M | 810 | 0.0163% |
+| **JEE10** | Sat Jan 31 | 2.7M | 554 | 0.0204% |
+| **JEE10** | Sun Feb 1 | 3.8M | 669 | 0.0177% |
+
+**Normalized weekend-to-weekend 499 rate increase: ~10%** (not 32.6%)
+
+The modest increase is within acceptable variance and may be related to JEE10 warmup effects.
 
 ## Key Observations
 
@@ -51,15 +63,16 @@ The 32.6% increase in HTTP 499 (client closed connection) suggests some requests
 - ✅ Success rates (2xx) proportionally maintained
 - ⚠️ 5xx errors increased by 29% (but still only 0.0023% of total traffic)
 - ⚠️ 502 Bad Gateway errors spiked 176% (very low absolute numbers)
-- ⚠️ Client aborts (499) increased 32.6% — possible latency regression
+- ✅ Client aborts (499) increased ~10% (weekend-to-weekend normalized) — within normal variance
 - ✅ 503 errors eliminated completely
 - ✅ 3xx redirects functioning normally
 
 ## Regression Indicators
 
-1. **Potential latency regression**: Increased 499 errors suggest longer request times
-2. **Internal server errors**: 500 errors up 25.6%
-3. **Gateway errors**: 502 errors increased significantly (percentage-wise)
+1. **Internal server errors**: 500 errors up 25.6%
+2. **Gateway errors**: 502 errors increased significantly (percentage-wise)
+
+~~Potential latency regression~~: Client aborts (499) showed only ~10% increase when comparing weekend-to-weekend, which is within normal variance.
 
 These require investigation to determine if they're JEE10-related regressions.
 

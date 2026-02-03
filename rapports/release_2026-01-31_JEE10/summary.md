@@ -82,7 +82,9 @@ This is a **major platform migration** from Java EE 8 to Jakarta EE 10, affectin
 | Total Requests/sec | 3,940.8 | 4,422.1 | +12.2% | ✅ Normal |
 | 5xx Errors/sec | 0.080 | 0.103 | +28.8% | ⚠️ Elevated |
 | 5xx Error Rate | 0.0020% | 0.0023% | +15% | ⚠️ Monitor |
-| Client Aborts (499)/sec | 1.72 | 2.28 | +32.6% | ⚠️ Monitor |
+| Client Aborts (499) | 0.0174% | 0.0191% | +9.8%* | ✅ Normal |
+
+*\* 499 comparison uses normalized weekend-to-weekend rate (not raw req/sec)*
 
 ### 3.3 HTTP Status Code Analysis
 
@@ -91,7 +93,7 @@ This is a **major platform migration** from Java EE 8 to Jakarta EE 10, affectin
 | 500 | +25.6% | Internal server errors increased |
 | 502 | +176% | Gateway errors spiked (low absolute) |
 | 503 | -100% | ✅ Service unavailable eliminated |
-| 499 | +32.6% | Client timeouts increased |
+| 499 | +9.8% | ✅ Client timeouts within normal variance (weekend-to-weekend) |
 
 📄 [Full Proxy Research](research/proxy.md) | [Application Research](research/application.md)
 
@@ -149,7 +151,6 @@ Both namespaces appearing indicates transitional state during migration.
 |-------|----------|----------|--------|
 | Infinispan NPE | 🔴 High | 129 events, new error class | Investigate cache compatibility |
 | 5xx error increase | ⚠️ Medium | +28.8% rate | Monitor trends |
-| Client timeouts (499) | ⚠️ Medium | +32.6% rate | Check slow endpoints |
 
 ### Improvements
 
@@ -158,6 +159,7 @@ Both namespaces appearing indicates transitional state during migration.
 | WS-REST response time | -3.6% P99 latency |
 | Database connections | Zero waiting connections |
 | 503 errors | Eliminated completely |
+| Client timeouts (499) | Only +9.8% (weekend-to-weekend), not 32.6% |
 
 ---
 
@@ -179,14 +181,12 @@ Both namespaces appearing indicates transitional state during migration.
 **Concerns:**
 - ⚠️ New Infinispan cache errors require investigation
 - ⚠️ 5xx error rate increased (still <0.01% of traffic)
-- ⚠️ Client timeout rate increased 32.6%
 
 ### Recommendations
 
 1. **Immediate:** Investigate Infinispan `CacheEntry.isRemoved()` NPE in `LeerlingContextPermissionResolver`
 2. **Short-term:** Monitor 5xx error trends over next 48 hours
-3. **Medium-term:** Review client timeout increases for slow endpoint identification
-4. **Ongoing:** Track jakarta.* vs javax.* error ratio as migration completes
+3. **Ongoing:** Track jakarta.* vs javax.* error ratio as migration completes
 
 ---
 

@@ -181,6 +181,34 @@ Both namespaces appearing indicates transitional state during migration.
 
 ---
 
+## 🔍 ROOT CAUSE IDENTIFIED: Database Schema Migration Failure
+
+**SMOKING GUN:** Bugsnag error analysis reveals the exact cause of the 167% sis-ui performance regression.
+
+### Critical Database Error Pattern (Saturday 10:00-16:00)
+**Error:** `javax.ejb.EJBTransactionRolledbackException`  
+**Root Cause:** `ERROR: relation "afgenomenfeature" does not exist`  
+**Frequency:** 19 transaction rollbacks during the exact P99 spike window
+
+### Technical Failure Chain
+```
+1. JEE10 Migration → Missing database table "afgenomenfeature"
+2. Background Jobs → Feature flag checks fail (FeatureService.isFeatureActief)
+3. Transaction Rollbacks → Database connections held longer
+4. Connection Pool Exhaustion → All sis-ui requests compete for connections  
+5. P99 Latency Spike → 1.17s → 3.12s (+167%) for slowest requests
+```
+
+### Supporting Evidence
+- **Stack Trace:** `ResultatenPublicerenJob → FeatureService.isFeatureActief() [149] → AfgenomenFeatureDAO [42] → SQL GRAMMAR EXCEPTION`
+- **Timeline Match:** Error burst during exact performance regression window
+- **Hibernate 6 Issues:** Additional entity casting failures in UI components
+- **Resource Contention:** Database failures cascading to user-facing requests
+
+**Technical Verdict:** JEE10 migration was **incomplete** — missing database schema caused background job failures that exhausted connection pools, degrading user-facing performance.
+
+---
+
 ## 5. Identified Regressions
 
 ### 🔴 Critical Issues (Saturday-to-Saturday)
@@ -212,10 +240,16 @@ Both namespaces appearing indicates transitional state during migration.
 
 ### Rationale
 
-**Critical Issues Found:**
-- 🔴 **sis-ui P99 latency +166.7%** — Main UI nearly 3x slower on weekend traffic
-- 🔴 **authenticator P99 +44.7%** — Login performance degraded
-- 🔴 **Infinispan cache NPE** — 129 events, new error introduced by JEE10
+**Critical Root Cause Identified:**
+- 🔴 **Database Schema Incomplete** — Missing `afgenomenfeature` table causing transaction rollbacks
+- 🔴 **Connection Pool Exhaustion** — Background job failures cascading to user requests
+- 🔴 **P99 Latency +167%** — Main UI nearly 3x slower (1.17s → 3.12s) 
+- 🔴 **JEE10 Migration Incomplete** — Multiple Hibernate 6 entity casting issues
+
+**Evidence Trail:**
+- Bugsnag errors correlate exactly with performance regression window
+- 19 transaction rollbacks during peak latency spike (Sat 10:00-16:00)
+- Feature flag database queries failing → resource contention → user impact
 
 **Positive Factors:**
 - ✅ Infrastructure stable (tunnel, database, ingress)

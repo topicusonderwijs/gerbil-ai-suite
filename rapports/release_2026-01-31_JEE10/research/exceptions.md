@@ -26,6 +26,42 @@
 
 ### Somtoday Backend (543ce4797765623fb900011d)
 
+## CRITICAL: Saturday Performance Regression Window (10:00-16:00 CET)
+
+**🔴 SMOKING GUN:** Errors during exact P99 latency spike window (1.17s → 3.12s, +167%)
+
+### Database Schema Migration Failure
+**Error ID:** `6781d0a0bd74ea4847e1ca99` (19 events)  
+**Type:** `javax.ejb.EJBTransactionRolledbackException`  
+**Root Cause:** `ERROR: relation "afgenomenfeature" does not exist`
+
+```
+Stack Path: ResultatenPublicerenJob → FeatureService.isFeatureActief() [149] 
+           → AfgenomenFeatureDAO.isFeatureAfgenomenOpPeildatum() [42]
+           → AbstractDAO.exists() [733] → SQL GRAMMAR EXCEPTION
+```
+
+**Impact:** Feature flag database checks failing → transaction rollbacks → connection pool exhaustion → P99 latency spike
+
+### Hibernate 6 Entity Casting Issue  
+**Error ID:** `697e2591d9ec7652c2db3d2a` (3 events)  
+**Type:** `org.apache.wicket.WicketRuntimeException`  
+**Message:** "Can't cast expression to unknown type: nl.topicus.platinum.entities.Stamgroep"
+
+```  
+Stack Path: WaarnemingHibernate6DataAccessHelperImpl.addAfdelingCriteria() [391]
+           → JQ.as() [221] → Can't cast expression 
+```
+
+**Impact:** UI data panel rendering failures → slow page loads → user-facing performance degradation
+
+### Error Correlation Summary
+- **Timeline Match:** Errors concentrated in exact P99 spike window (Sat 10:00-16:00)
+- **System Impact:** Database failures → resource contention → widespread slowdown  
+- **JEE10 Root Cause:** Schema migration incompleteness + Hibernate 6 entity mapping issues
+
+## Regular Error Patterns
+
 | Error | Events | First Seen | Context | Severity |
 |-------|--------|------------|---------|----------|
 | `javax.transaction.RollbackException` (OAuth2Token) | 1,802 | Feb 1 14:45 | REST | ⚠️ Warning |

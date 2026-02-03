@@ -9,14 +9,14 @@
 
 ## Executive Summary
 
-The JEE10 migration was deployed over the weekend of January 31 - February 1, 2026. Overall system health remained **stable** with no critical outages. However, several **potential regressions** were identified that require monitoring:
+The JEE10 migration was deployed over the weekend of January 31 - February 1, 2026. Initial weekday analysis showed stable performance, but **Saturday-to-Saturday comparison reveals critical regressions**:
 
 | Aspect | Status | Details |
-|--------|--------|---------|
+|--------|--------|---------||
 | **Infrastructure** | ✅ Stable | Tunnel, ingress, database all healthy |
-| **Performance** | ⚠️ Mixed | WS-REST improved, slight 5xx increase |
+| **Performance** | 🔴 **Regression** | sis-ui P99 +167%, authenticator +45% (Sat-to-Sat) |
 | **Errors** | ⚠️ Monitor | New Infinispan cache errors detected |
-| **Overall** | ⚠️ **Conditional Go** | Requires monitoring |
+| **Overall** | 🔴 **No-Go / Investigate** | Critical latency regression found |
 
 ---
 
@@ -68,12 +68,21 @@ This is a **major platform migration** from Java EE 8 to Jakarta EE 10, affectin
 
 ### 3.1 Response Times (P99)
 
+#### Weekday Comparison (Thu → Mon)
 | Component | JEE8 | JEE10 | Delta | Status |
 |-----------|------|-------|-------|--------|
 | **sis-ui** | 2.263s | 2.351s | +3.9% | ✅ Normal |
 | **ws-rest** | 0.926s | 0.893s | **-3.6%** | ✅ Improved |
 
-**Summary:** Mixed results. WS-REST **improved** by 3.6%, while SIS-UI showed minor 3.9% degradation (within acceptable variance).
+#### 🔴 Saturday-to-Saturday Comparison (Jan 24 vs Jan 31)
+| Component | JEE8 (Sat) | JEE10 (Sat) | Delta | Status |
+|-----------|------------|-------------|-------|--------|
+| **sis-ui** | 1.170s | 3.120s | **+166.7%** | 🔴 Critical |
+| **ws-rest** | 0.751s | 0.824s | +9.7% | ⚠️ Degraded |
+| **authenticator** | 0.206s | 0.298s | +44.7% | ⚠️ Degraded |
+| **connect-rest** | 1.067s | 1.061s | -0.6% | ✅ Same |
+
+**Summary:** Weekday comparison showed acceptable performance, but **Saturday-to-Saturday reveals critical sis-ui regression (+167%)**. The authenticator also shows significant degradation (+45%).
 
 ### 3.2 Throughput & Errors
 
@@ -145,21 +154,23 @@ Both namespaces appearing indicates transitional state during migration.
 
 ## 5. Identified Regressions
 
-### Confirmed Issues
+### 🔴 Critical Issues (Saturday-to-Saturday)
 
 | Issue | Severity | Evidence | Action |
 |-------|----------|----------|--------|
+| **sis-ui P99 latency** | 🔴 Critical | +166.7% (1.17s → 3.12s) | **Investigate immediately** |
+| **authenticator P99 latency** | ⚠️ High | +44.7% (206ms → 298ms) | Investigate auth performance |
+| ws-rest P99 latency | ⚠️ Medium | +9.7% on weekend | Monitor |
 | Infinispan NPE | 🔴 High | 129 events, new error class | Investigate cache compatibility |
-| 5xx error increase | ⚠️ Medium | +28.8% rate | Monitor trends |
 
-### Improvements
+### ✅ Improvements
 
 | Improvement | Evidence |
 |-------------|----------|
-| WS-REST response time | -3.6% P99 latency |
+| 5xx error rate (Saturday) | -24.9% fewer errors |
 | Database connections | Zero waiting connections |
 | 503 errors | Eliminated completely |
-| Client timeouts (499) | Only +9.8% (weekend-to-weekend), not 32.6% |
+| Client timeouts (499) | Only +9.8% (within normal variance) |
 
 ---
 
@@ -167,26 +178,38 @@ Both namespaces appearing indicates transitional state during migration.
 
 ### Go / No-Go Decision
 
-| Decision | ⚠️ **Conditional Go** |
-|----------|----------------------|
+| Decision | 🔴 **No-Go / Rollback Recommended** |
+|----------|------------------------------------|
 
 ### Rationale
 
+**Critical Issues Found:**
+- 🔴 **sis-ui P99 latency +166.7%** — Main UI nearly 3x slower on weekend traffic
+- 🔴 **authenticator P99 +44.7%** — Login performance degraded
+- 🔴 **Infinispan cache NPE** — 129 events, new error introduced by JEE10
+
 **Positive Factors:**
 - ✅ Infrastructure stable (tunnel, database, ingress)
-- ✅ WS-REST performance improved
+- ✅ 5xx error rate actually improved on Saturday (-24.9%)
 - ✅ No critical outages during deployment
 - ✅ 503 errors eliminated
 
-**Concerns:**
-- ⚠️ New Infinispan cache errors require investigation
-- ⚠️ 5xx error rate increased (still <0.01% of traffic)
-
 ### Recommendations
 
-1. **Immediate:** Investigate Infinispan `CacheEntry.isRemoved()` NPE in `LeerlingContextPermissionResolver`
-2. **Short-term:** Monitor 5xx error trends over next 48 hours
-3. **Ongoing:** Track jakarta.* vs javax.* error ratio as migration completes
+1. **Immediate:** Consider rollback to JEE8 pending investigation of sis-ui latency regression
+2. **Critical:** Investigate why sis-ui P99 increased 167% under comparable weekend load
+3. **High:** Investigate authenticator performance degradation (+45%)
+4. **High:** Fix Infinispan `CacheEntry.isRemoved()` NPE in `LeerlingContextPermissionResolver`
+5. **Medium:** Determine root cause before next JEE10 deployment attempt
+
+### Why Saturday-to-Saturday Matters
+
+The weekday comparison (Thu→Mon) showed acceptable metrics because:
+- Different traffic patterns and volumes
+- Monday had 12% more traffic than Thursday
+- Higher load can mask latency issues with warm caches
+
+Saturday-to-Saturday provides a cleaner comparison with similar low-traffic conditions, revealing the true performance impact of JEE10.
 
 ---
 

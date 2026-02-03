@@ -7,12 +7,43 @@
 
 ## Response Times (P99)
 
-### Key Components
+### Weekday Comparison (Thu Jan 30 vs Mon Feb 2)
 
 | Component | JEE8 P99 (sec) | JEE10 P99 (sec) | Delta | Status |
 |-----------|----------------|-----------------|-------|--------|
 | sis-ui | 2.263 | 2.351 | +0.088 (+3.9%) | ✅ Normal |
 | ws-rest | 0.926 | 0.893 | -0.033 (-3.6%) | ✅ Improved |
+
+### 🔴 Saturday-to-Saturday Comparison (Jan 24 vs Jan 31 @ 12:00 CET)
+
+*This comparison provides a more accurate view by comparing equivalent weekend traffic patterns.*
+
+| Component | JEE8 (Sat Jan 24) | JEE10 (Sat Jan 31) | Delta | Status |
+|-----------|-------------------|--------------------|---------|-----------|
+| **sis-ui** | 1.170s | 3.120s | **+166.7%** | 🔴 Regression |
+| **ws-rest** | 0.751s | 0.824s | +9.7% | ⚠️ Degraded |
+| **authenticator** | 0.206s | 0.298s | +44.7% | ⚠️ Degraded |
+| **connect-rest** | 1.067s | 1.061s | -0.6% | ✅ Same |
+
+#### Critical Finding: sis-ui Latency Regression
+
+The Saturday-to-Saturday comparison reveals a **critical performance regression** in sis-ui that was masked in the weekday comparison:
+- **JEE8 Saturday P99:** 1.17 seconds
+- **JEE10 Saturday P99:** 3.12 seconds
+- **Regression:** +167% (nearly 3x slower)
+
+This is a significant finding that requires immediate investigation.
+
+### Saturday Traffic & Error Comparison
+
+| Metric | JEE8 (Sat Jan 24) | JEE10 (Sat Jan 31) | Delta | Status |
+|--------|-------------------|--------------------|---------|-----------|
+| Total Requests/sec | 999.9 | 753.6 | -24.6% | Lower traffic |
+| 5xx Errors/sec | 0.00446 | 0.00335 | **-24.9%** | ✅ Improved |
+| 500 Errors/sec | 0.00391 | 0.00279 | **-28.7%** | ✅ Improved |
+| 502 Errors/sec | 0.00056 | 0.00056 | 0% | ✅ Same |
+| DB Active Connections | 3,914 | 3,433 | -12.3% | ✅ Lower |
+| HA Tunnel Connections | 24 | 16 | -33.3% | ⚠️ Fewer |
 
 ### Analysis
 
@@ -50,34 +81,46 @@ The 12.2% increase in throughput is expected variance between weekday traffic pa
 
 ## Performance Regression Assessment
 
-### Potential Regressions Identified
+### 🔴 Confirmed Regressions (Saturday-to-Saturday)
 
-1. **HTTP 499 (Client Aborts)** increased 32.6%
-   - Suggests some requests timing out from client side
-   - May indicate backend processing taking longer
-   
-2. **HTTP 500 errors** increased 25.6%
+1. **sis-ui P99 latency: +166.7%** (1.17s → 3.12s)
+   - Critical regression visible only in weekend comparison
+   - Weekday comparison masked this due to different traffic patterns
+   - Requires immediate investigation
+
+2. **authenticator P99 latency: +44.7%** (206ms → 298ms)
+   - Login/auth operations taking longer
+   - May affect user experience during authentication
+
+3. **ws-rest P99 latency: +9.7%** (751ms → 824ms)
+   - Mild degradation in student API
+   - Note: weekday comparison showed improvement, weekend shows degradation
+
+### ⚠️ Potential Issues (Weekday comparison)
+
+1. **HTTP 500 errors** increased 25.6% (weekday-to-weekday)
    - Internal server errors up slightly
    - Could indicate JEE10 compatibility issues
 
-3. **HTTP 502 errors** increased 176% (very low base)
+2. **HTTP 502 errors** increased 176% (very low base)
    - Gateway errors spiked percentage-wise
    - Absolute numbers still very low (~0.005/sec)
 
-### Improvements Observed
+### ✅ Improvements Observed
 
-1. **WS-REST response time** improved 3.6%
+1. **5xx error rate on Saturday:** -24.9% fewer errors
 2. **HTTP 503 errors** eliminated completely
 3. **Database waiting connections** improved (1 → 0)
+4. **Client timeouts (499):** Only +9.8% (within normal variance)
 
 ## Key Observations
 
-- ✅ SIS-UI P99 response time within acceptable variance (+3.9%)
-- ✅ WS-REST P99 response time **improved** (-3.6%)
-- ✅ Overall throughput healthy
-- ⚠️ 5xx error rate increased 29% (still <0.01% of traffic)
-- ⚠️ Client timeout rate (499) increased 32.6%
-- ⚠️ Recommend monitoring error trends over coming days
+- 🔴 **CRITICAL:** SIS-UI P99 response time +166.7% on Saturday-to-Saturday comparison
+- ⚠️ Authenticator P99 response time +44.7% (Saturday-to-Saturday)
+- ⚠️ WS-REST P99: improved on weekdays (-3.6%), degraded on weekend (+9.7%)
+- ✅ 5xx error rate actually improved on Saturday comparison (-24.9%)
+- ✅ Client timeout rate (499) only +9.8% (within normal variance)
+- 🔴 **Recommend rollback investigation** for sis-ui latency regression
 
 ## Data Gaps
 - Thread utilization metrics not available (Grafana Cloud Metrics datasource returned empty)

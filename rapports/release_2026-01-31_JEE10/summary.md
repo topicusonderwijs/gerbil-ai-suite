@@ -15,8 +15,8 @@ The JEE10 migration was deployed over the weekend of January 31 - February 1, 20
 |--------|--------|---------||
 | **Infrastructure** | ✅ Stable | Tunnel, ingress, database all healthy |
 | **Performance** | 🔴 **Regression** | sis-ui P99 +167%, authenticator +45% (Sat-to-Sat) |
-| **Errors** | ⚠️ Monitor | New Infinispan cache errors detected |
-| **Overall** | 🔴 **No-Go / Investigate** | Critical latency regression found |
+| **Errors** | ✅ Clean | Zero production errors during regression window |
+| **Overall** | ⚠️ **Conditional Go** | Critical latency regression - root cause unknown |
 
 ---
 
@@ -137,97 +137,70 @@ This is a **major platform migration** from Java EE 8 to Jakarta EE 10, affectin
 
 ---
 
-## 4. Error Analysis (Bugsnag)
+## 4. Error Analysis (Bugsnag) - Production Environment
 
-### 4.1 Error Counts
+### 4.1 Production Error Counts (app.release_stage="productie")
 
-| Project | JEE10 Period | Baseline (JEE8) | Trend |
-|---------|--------------|-----------------|-------|
-| Somtoday Backend | 311 errors | 411 errors | ⬇️ -24% |
-| Somtoday Docent | 59 errors | - | - |
-| Somtoday Leerling | 65 errors | - | - |
+| Project | Saturday Window (10:00-16:00) | Status |
+|---------|-------------------------------|--------|
+| Somtoday Backend | **0 errors** | ✅ Clean |
+| Somtoday Docent | **0 errors** | ✅ Clean |
+| Somtoday Leerling | **0 errors** | ✅ Clean |
 
-### 4.2 NEW Errors (Potential Regressions) 🔴
+**Critical Finding:** Despite 167% P99 latency regression, **zero production errors** occurred during the performance degradation window.
 
-| Error | Events | Component | Severity |
-|-------|--------|-----------|----------|
-| **Infinispan CacheEntry NPE** | 129 | REST | 🔴 High |
-| `jakarta.transaction.RollbackException` | 297+ | REST | ⚠️ Medium |
-| FetchError ETIMEDOUT (docent-rest) | 1,121 | Docent | ⚠️ Medium |
+### 4.2 Production Performance Paradox
 
-#### Critical: Infinispan Cache NullPointerException
-```
-Cannot invoke "org.infinispan.container.entries.CacheEntry.isRemoved()" 
-because "entry" is null
-```
-- **Location:** `LeerlingContextPermissionResolver.java:116`
-- **First Seen:** 2026-01-31 09:07 (immediately after deployment)
-- **Impact:** 129 events, affecting permission resolution
+**Critical Finding:** The 167% sis-ui latency regression occurred with **zero production application errors**.
 
-This is a **potential JEE10 compatibility issue** with Infinispan distributed cache.
+This paradox indicates:
+- The performance issue is **not caused by application exceptions**
+- Likely causes: JVM behavior changes, garbage collection patterns, or low-level platform differences
+- **Root cause remains unknown** and requires deeper investigation
 
-### 4.3 Jakarta Namespace Migration
+### 4.3 Non-Production Error Analysis
 
-Evidence of JEE8 → JEE10 transition in error classes:
+⚠️ **Note:** Errors detected in Bugsnag were from non-production environments (`inkijk`, `test`, `pr`) and cannot be correlated with production performance issues.
 
-| Package | Version | Errors |
-|---------|---------|--------|
-| `javax.transaction.*` | JEE8 | 2,185+ |
-| `jakarta.transaction.*` | JEE10 | 297+ |
-
-Both namespaces appearing indicates transitional state during migration.
+Some JEE10-related errors observed in test environments:
+- Infinispan cache issues in `inkijk` environment
+- Jakarta namespace migration patterns in test deployments
+- Database schema mismatches in inspection environments
 
 📄 [Full Exceptions Research](research/exceptions.md)
 
 ---
 
-## 🔍 ROOT CAUSE IDENTIFIED: Database Schema Migration Failure
+## 5. Performance Analysis Summary
 
-**SMOKING GUN:** Bugsnag error analysis reveals the exact cause of the 167% sis-ui performance regression.
+### 🔴 Performance Regression Identified
 
-### Critical Database Error Pattern (Saturday 10:00-16:00)
-**Error:** `javax.ejb.EJBTransactionRolledbackException`  
-**Root Cause:** `ERROR: relation "afgenomenfeature" does not exist`  
-**Frequency:** 19 transaction rollbacks during the exact P99 spike window
+**Primary Finding:** Significant latency increase without corresponding application errors suggests platform-level performance issue.
 
-### Technical Failure Chain
-```
-1. JEE10 Migration → Missing database table "afgenomenfeature"
-2. Background Jobs → Feature flag checks fail (FeatureService.isFeatureActief)
-3. Transaction Rollbacks → Database connections held longer
-4. Connection Pool Exhaustion → All sis-ui requests compete for connections  
-5. P99 Latency Spike → 1.17s → 3.12s (+167%) for slowest requests
-```
+| Metric | Baseline | JEE10 Release | Delta | Status |
+|--------|----------|---------------|-------|--------|
+| **sis-ui P99 latency** | 1.17s | 3.12s | +166.7% | 🔴 Critical regression |
+| **authenticator P99 latency** | 206ms | 298ms | +44.7% | ⚠️ High regression |
+| ws-rest P99 latency | 315ms | 345ms | +9.7% | ⚠️ Medium regression |
 
-### Supporting Evidence
-- **Stack Trace:** `ResultatenPublicerenJob → FeatureService.isFeatureActief() [149] → AfgenomenFeatureDAO [42] → SQL GRAMMAR EXCEPTION`
-- **Timeline Match:** Error burst during exact performance regression window
-- **Hibernate 6 Issues:** Additional entity casting failures in UI components
-- **Resource Contention:** Database failures cascading to user-facing requests
-
-**Technical Verdict:** JEE10 migration was **incomplete** — missing database schema caused background job failures that exhausted connection pools, degrading user-facing performance.
-
----
-
-## 5. Identified Regressions
-
-### 🔴 Critical Issues (Saturday-to-Saturday)
-
-| Issue | Severity | Evidence | Action |
-|-------|----------|----------|--------|
-| **sis-ui P99 latency** | 🔴 Critical | +166.7% (1.17s → 3.12s) | **Investigate immediately** |
-| **authenticator P99 latency** | ⚠️ High | +44.7% (206ms → 298ms) | Investigate auth performance |
-| ws-rest P99 latency | ⚠️ Medium | +9.7% on weekend | Monitor |
-| Infinispan NPE | 🔴 High | 129 events, new error class | Investigate cache compatibility |
-
-### ✅ Improvements
+### ✅ Stability Indicators (Production)
 
 | Improvement | Evidence |
 |-------------|----------|
-| 5xx error rate (Saturday) | -24.9% fewer errors |
-| Database connections | Zero waiting connections |
+| Application errors | ✅ Zero new production errors during release |
+| 5xx error rate (Saturday) | -24.9% improvement |
+| Database connections | Zero waiting connections, stable pool |
 | 503 errors | Eliminated completely |
-| Client timeouts (499) | Only +9.8% (within normal variance) |
+| Infrastructure health | All systems normal (tunnel, ingress, K8s) |
+
+### 🔍 Investigation Required
+
+**Performance Paradox:** 167% latency increase with zero production application errors indicates:
+- Platform-level issue (JVM, JEE10 runtime)
+- Infrastructure performance changes
+- Resource contention without error manifestation
+
+**Non-Production Issues (Separate):** Database schema and Hibernate issues exist in test/inkijk environments but do not correlate with production performance regression.
 
 ---
 
@@ -235,35 +208,37 @@ Both namespaces appearing indicates transitional state during migration.
 
 ### Go / No-Go Decision
 
-| Decision | 🔴 **No-Go / Rollback Recommended** |
-|----------|------------------------------------|
+| Decision | ⚠️ **Conditional Go - Investigation Required** |
+|----------|-----------------------------------------------|
 
 ### Rationale
 
-**Critical Root Cause Identified:**
-- 🔴 **Database Schema Incomplete** — Missing `afgenomenfeature` table causing transaction rollbacks
-- 🔴 **Connection Pool Exhaustion** — Background job failures cascading to user requests
-- 🔴 **P99 Latency +167%** — Main UI nearly 3x slower (1.17s → 3.12s) 
-- 🔴 **JEE10 Migration Incomplete** — Multiple Hibernate 6 entity casting issues
+**Performance Paradox Identified:**
+- 🔴 **P99 Latency +167%** — Main UI nearly 3x slower (1.17s → 3.12s) Saturday comparison
+- ✅ **Zero Production Application Errors** — No new errors in production environment during release window
+- ⚠️ **Root Cause Unknown** — Performance degradation without corresponding application errors suggests platform-level issue
 
-**Evidence Trail:**
-- Bugsnag errors correlate exactly with performance regression window
-- 19 transaction rollbacks during peak latency spike (Sat 10:00-16:00)
-- Feature flag database queries failing → resource contention → user impact
+**Evidence Summary:**
+- Grafana metrics show significant latency increase (Saturday-to-Saturday comparison)
+- Bugsnag production environment shows clean error slate during performance regression window
+- Previous error correlation was from non-production environments (inkijk/test)
 
 **Positive Factors:**
 - ✅ Infrastructure stable (tunnel, database, ingress)
 - ✅ 5xx error rate actually improved on Saturday (-24.9%)
 - ✅ No critical outages during deployment
 - ✅ 503 errors eliminated
+- ✅ No production application errors detected
 
 ### Recommendations
 
-1. **Immediate:** Consider rollback to JEE8 pending investigation of sis-ui latency regression
-2. **Critical:** Investigate why sis-ui P99 increased 167% under comparable weekend load
-3. **High:** Investigate authenticator performance degradation (+45%)
-4. **High:** Fix Infinispan `CacheEntry.isRemoved()` NPE in `LeerlingContextPermissionResolver`
-5. **Medium:** Determine root cause before next JEE10 deployment attempt
+1. **🔍 Critical:** Deep investigation needed - 167% P99 latency increase with zero production application errors suggests platform-level issue
+2. **⚙️ High:** Investigate potential JEE10 JVM configuration changes (GC tuning, thread pools)
+3. **📊 High:** Implement application performance monitoring (APM) to trace slow requests during peak latency periods
+4. **🎯 High:** Investigate authenticator performance degradation (+45% latency)
+5. **🔧 Medium:** Profile JVM behavior during high latency windows (thread dumps, GC logs)
+6. **🚀 Medium:** Consider canary deployment strategy for future JEE platform migrations
+7. **🧹 Low:** Address non-production environment issues separately (inkijk schema, test environment cleanup)
 
 ### Why Saturday-to-Saturday Matters
 

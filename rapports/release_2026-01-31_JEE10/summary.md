@@ -84,6 +84,35 @@ This is a **major platform migration** from Java EE 8 to Jakarta EE 10, affectin
 
 **Summary:** Weekday comparison showed acceptable performance, but **Saturday-to-Saturday reveals critical sis-ui regression (+167%)**. The authenticator also shows significant degradation (+45%).
 
+#### 📊 Supporting Evidence: sis-ui Regression Analysis
+
+**Multiple time samples confirm the regression is consistent, not a single anomaly:**
+
+| Time (CET) | JEE8 (Jan 24/25) | JEE10 (Jan 31/Feb 1) | Delta |
+|------------|------------------|----------------------|-------|
+| Sat 10:00 | 1.158s | 2.772s | **+139%** |
+| Sat 12:00 | 1.170s | 3.120s | **+167%** |
+| Sat 14:00 | 1.196s | 2.869s | **+140%** |
+| Sun 12:00 | 1.185s | 2.607s | **+120%** |
+
+**Percentile breakdown (Saturday 12:00):**
+
+| Percentile | JEE8 | JEE10 | Delta |
+|------------|------|-------|-------|
+| P50 (median) | 60ms | 60ms | 0% |
+| P95 | 665ms | 751ms | **+13%** |
+| P99 | 1.17s | 3.12s | **+167%** |
+
+**Key insight:** The median (P50) is unchanged, but P99 increased dramatically. This indicates:
+- Most requests are fine (60ms median)
+- The **slowest 1% of requests are 3x slower** under JEE10
+- Likely a specific code path or query affected by JEE10 migration
+
+**Traffic was comparable:**
+- JEE8 Saturday: 17.0 req/sec to sis-ui
+- JEE10 Saturday: 14.1 req/sec to sis-ui (-17% traffic)
+- Lower traffic should mean *better* latency, yet P99 tripled
+
 ### 3.2 Throughput & Errors
 
 | Metric | JEE8 | JEE10 | Delta | Status |

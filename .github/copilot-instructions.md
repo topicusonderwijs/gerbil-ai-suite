@@ -147,14 +147,37 @@ Key `component` label values for filtering:
 ### Bugsnag Projects
 Query these specific projects (not a wildcard search):
 
-| Project | Description |
-|---------|-------------|
-| **Somtoday** | Main application and backend |
-| **Somtoday docent** | Angular frontend for teachers |
-| **Somtoday leerling** | Angular mobile app for students |
+| Project ID | Project | Description |
+|------------|---------|-------------|
+| **543ce4797765623fb900011d** | **Somtoday** | Main application and backend |
+| **59d20374c943ea002679e025** | **Somtoday docent** | Angular frontend for teachers |
+| **65e09a58bf784d00154ac51a** | **Somtoday leerling** | Angular mobile app for students |
 
-- Compare errors between release versions using timestamp filters
+### Bugsnag Environment Filtering
+**CRITICAL:** Always filter by correct `app.release_stage` when investigating production issues:
+
+| Environment | `app.release_stage` Filter | Purpose |
+|-------------|---------------------------|---------|
+| **Production** | `"productie"` | Live production environment |
+| **Acceptance** | `"acceptatie"` | Staging/acceptance testing |
+| **Test** | `"test"` | Development testing |
+| **Inkijk** | `"inkijk"` / `"inkijk2"` | Read-only inspection environment |
+| **PR** | `"pr"` | Pull request testing |
+
+**Example production error filter:**
+```json
+{
+  "app.release_stage": [{"type": "eq", "value": "productie"}],
+  "event.since": [{"type": "eq", "value": "2026-01-31T10:00:00Z"}],
+  "event.before": [{"type": "eq", "value": "2026-01-31T16:00:00Z"}]
+}
+```
+
+**Analysis Guidelines:**
+- Compare errors between release versions using timestamp AND environment filters
 - Focus on **new errors** introduced in a release, not pre-existing ones
+- **Never correlate non-production errors with production performance issues**
+- Always verify `app.release_stage` in error details before drawing conclusions
 
 ### Database Reference
 For context when analyzing database-related incidents:

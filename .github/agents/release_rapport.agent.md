@@ -88,8 +88,8 @@ Execute these steps systematically, using the todo list to track progress. **Wri
 25. **SAVE** findings immediately to `research/application.md`
 
 #### Phase 7: Error & Stability Analysis → `research/exceptions.md`
-26. Query Bugsnag for errors in the new release version
-27. Compare error counts: new release vs previous release
+26. Query Bugsnag for errors in the new release version **filtering by `app.release_stage = "productie"`**
+27. Compare error counts: new release vs previous release (production only)
 28. Identify NEW errors (not seen in previous version)
 29. Get stability scores for all Somtoday projects
 30. **SAVE** findings immediately to `research/exceptions.md`
@@ -250,6 +250,7 @@ Execute these steps systematically, using the todo list to track progress. **Wri
 
 **Release Time Window:** YYYY-MM-DD HH:MM - HH:MM CET
 **Bugsnag Projects:** Somtoday, Somtoday docent, Somtoday leerling
+**Environment Filter:** `app.release_stage = "productie"` (PRODUCTION ONLY)
 
 ## Stability Scores
 
@@ -259,7 +260,7 @@ Execute these steps systematically, using the todo list to track progress. **Wri
 | Somtoday docent | | | |
 | Somtoday leerling | | | |
 
-## Error Counts
+## Error Counts (Production Only)
 
 | Project | Previous Release | Current Release | Delta |
 |---------|-----------------|-----------------|-------|
@@ -274,6 +275,16 @@ Execute these steps systematically, using the todo list to track progress. **Wri
 | Issue | Events | Users Affected |
 |-------|--------|----------------|
 | | | |
+
+## Queries Used
+```json
+// Example production filter:
+{
+  "app.release_stage": [{"type": "eq", "value": "productie"}],
+  "event.since": [{"type": "eq", "value": "YYYY-MM-DDTHH:MM:SSZ"}],
+  "event.before": [{"type": "eq", "value": "YYYY-MM-DDTHH:MM:SSZ"}]
+}
+```
 
 ## Key Observations
 - [Bullet points of notable findings]

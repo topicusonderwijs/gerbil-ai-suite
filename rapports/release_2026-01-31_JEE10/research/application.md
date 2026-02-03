@@ -138,4 +138,39 @@ histogram_quantile(0.99, sum(rate(traefik_service_request_duration_seconds_bucke
 
 # Error rates
 sum(rate(traefik_service_requests_total{kubernetes_cluster="somtoday", code=~"5.."}[1h]))
+
+# Thread utilization
+max((wildfly_io_busy_task_thread_count{kubernetes_cluster="somtoday", environment="productie", component="sis-ui"} + wildfly_io_queue_size) / wildfly_io_max_pool_size) by (component) * 100
+
+# Session creation
+wildfly_undertow_sessions_created_total{kubernetes_cluster="somtoday", environment="productie", component="sis-ui"}
 ```
+
+## Additional Metrics Analysis
+
+### JVM Thread Utilization
+
+| Time Window | Thread Utilization |  Status |
+|-------------|-------------------|---------|
+| Jan 31 10:00-16:00 CET | 0-4.4% (max) | ✅ Normal |
+| Previous Saturday | 0-6.7% (max) | ✅ Normal |
+
+**Analysis:** Thread utilization was actually *lower* during the regression window, ruling out thread exhaustion as a cause.
+
+### Session Metrics
+
+**Total Sessions Created During Regression (10:00-16:00 CET):** 
+- ~1,200 sessions across 6 sis-ui pods
+- **Rate:** ~20 sessions/hour per pod  
+- **Pattern:** Steady creation with spike around 14:10 CET
+
+**Key Finding:** Session creation appeared normal, indicating user traffic was being served despite high latency - users experienced slow responses but the system remained functional.
+
+## Final Assessment
+
+The comprehensive metrics analysis reveals:
+
+1. **Performance Regression Confirmed:** sis-ui P99 latency +167% (Saturday-to-Saturday comparison)
+2. **Resource Utilization Normal:** Thread pools, database connections not stressed  
+3. **Traffic Patterns Stable:** Session creation and request routing functioned normally
+4. **Root Cause Identified:** Database schema migration failure causing transaction rollbacks (19 events during regression window)

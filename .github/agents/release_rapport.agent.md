@@ -88,7 +88,11 @@ Execute these steps systematically, using the todo list to track progress. **Wri
 25. **SAVE** findings immediately to `research/application.md`
 
 #### Phase 7: Error & Stability Analysis → `research/exceptions.md`
-26. Query Bugsnag for errors in the new release version **filtering by `app.release_stage = "productie"`**
+26. Query Bugsnag for production errors using the **correct release stage per project:**
+    - **Somtoday Backend** (`543ce4797765623fb900011d`): filter `app.release_stage = "production"`
+    - **Somtoday Docent** (`59d20374c943ea002679e025`): filter `app.release_stage = "productie"`
+    - **Somtoday Leerling** (`65e09a58bf784d00154ac51a`): filter `app.release_stage = "productie"`
+    - ⚠️ Using `"productie"` on the Backend project will return 0 results!
 27. Compare error counts: new release vs previous release (production only)
 28. Identify NEW errors (not seen in previous version)
 29. Get stability scores for all Somtoday projects
@@ -250,7 +254,9 @@ Execute these steps systematically, using the todo list to track progress. **Wri
 
 **Release Time Window:** YYYY-MM-DD HH:MM - HH:MM CET
 **Bugsnag Projects:** Somtoday, Somtoday docent, Somtoday leerling
-**Environment Filter:** `app.release_stage = "productie"` (PRODUCTION ONLY)
+**Environment Filters:**
+- Somtoday Backend: `app.release_stage = "production"`
+- Somtoday Docent/Leerling: `app.release_stage = "productie"`
 
 ## Stability Scores
 
@@ -278,7 +284,14 @@ Execute these steps systematically, using the todo list to track progress. **Wri
 
 ## Queries Used
 ```json
-// Example production filter:
+// Somtoday Backend (543ce4797765623fb900011d) — uses "production":
+{
+  "app.release_stage": [{"type": "eq", "value": "production"}],
+  "event.since": [{"type": "eq", "value": "YYYY-MM-DDTHH:MM:SSZ"}],
+  "event.before": [{"type": "eq", "value": "YYYY-MM-DDTHH:MM:SSZ"}]
+}
+
+// Somtoday Docent/Leerling (frontend) — uses "productie":
 {
   "app.release_stage": [{"type": "eq", "value": "productie"}],
   "event.since": [{"type": "eq", "value": "YYYY-MM-DDTHH:MM:SSZ"}],

@@ -1,4 +1,3 @@
-```chatagent
 ---
 description: 'Incident Analyst: Performs comprehensive production incident analysis by correlating metrics, logs, errors, and code changes to support postmortem investigations.'
 tools: ['execute', 'read', 'edit', 'search', 'grafana/*', 'smartbear/*', 'github/*', 'todo', 'browser/*']
@@ -69,6 +68,11 @@ The user will provide:
 
 #### 2. SmartBear / Bugsnag (Errors)
 * **Projects:** "Somtoday", "Somtoday docent", "Somtoday leerling"
+* ⚠️ **CRITICAL: Projects use different production release stage names:**
+  - **Somtoday Backend** (`543ce4797765623fb900011d`): `app.release_stage = "production"`
+  - **Somtoday Docent** (`59d20374c943ea002679e025`): `app.release_stage = "productie"`
+  - **Somtoday Leerling** (`65e09a58bf784d00154ac51a`): `app.release_stage = "productie"`
+  - Using `"productie"` on the Backend project will return **0 results**!
 * Filter errors by the incident time window
 * Look for new errors, error spikes, or stack traces correlating with the incident
 
@@ -448,5 +452,4 @@ max((wildfly_io_busy_task_thread_count{kubernetes_cluster="somtoday", environmen
 ```promql
 eduarte_wildfly_request_time_1m{environment_type="production"}
 wildfly_excessive_load_detected_5m
-```
 ```

@@ -154,18 +154,39 @@ Query these specific projects (not a wildcard search):
 | **65e09a58bf784d00154ac51a** | **Somtoday leerling** | Angular mobile app for students |
 
 ### Bugsnag Environment Filtering
-**CRITICAL:** Always filter by correct `app.release_stage` when investigating production issues:
+**CRITICAL:** Always filter by correct `app.release_stage` when investigating production issues.
 
-| Environment | `app.release_stage` Filter | Purpose |
-|-------------|---------------------------|---------|
-| **Production** | `"productie"` | Live production environment |
-| **Acceptance** | `"acceptatie"` | Staging/acceptance testing |
-| **Test** | `"test"` | Development testing |
-| **Inkijk** | `"inkijk"` / `"inkijk2"` | Read-only inspection environment |
-| **PR** | `"pr"` | Pull request testing |
+⚠️ **IMPORTANT: The Backend and Frontend projects use DIFFERENT release stage names for production:**
 
-**Example production error filter:**
+| Project | Project ID | Production `app.release_stage` |
+|---------|-----------|-------------------------------|
+| **Somtoday** (Backend) | `543ce4797765623fb900011d` | `"production"` |
+| **Somtoday Docent** (Frontend) | `59d20374c943ea002679e025` | `"productie"` |
+| **Somtoday Leerling** (Frontend) | `65e09a58bf784d00154ac51a` | `"productie"` |
+
+**All environment stage values:**
+
+| Environment | Backend (`Somtoday`) | Frontend (`Docent` / `Leerling`) |
+|-------------|---------------------|----------------------------------|
+| **Production** | `"production"` | `"productie"` |
+| **Acceptance** | `"acceptatie"` | `"acceptatie"` |
+| **Test** | `"test"` | `"test"` |
+| **Inkijk** | `"inkijk"` / `"inkijk2"` | — |
+| **PR** | `"pr"` | — |
+| **Regressie** | `"regressie"` | — |
+| **Nightly** | `"nightly"` | — |
+| **Native** | — | `"native"` |
+
+**Example production error filters:**
 ```json
+// For Somtoday Backend (project 543ce4797765623fb900011d):
+{
+  "app.release_stage": [{"type": "eq", "value": "production"}],
+  "event.since": [{"type": "eq", "value": "2026-01-31T10:00:00Z"}],
+  "event.before": [{"type": "eq", "value": "2026-01-31T16:00:00Z"}]
+}
+
+// For Somtoday Docent / Leerling (frontend projects):
 {
   "app.release_stage": [{"type": "eq", "value": "productie"}],
   "event.since": [{"type": "eq", "value": "2026-01-31T10:00:00Z"}],
@@ -174,6 +195,7 @@ Query these specific projects (not a wildcard search):
 ```
 
 **Analysis Guidelines:**
+- ⚠️ **Always use the correct release stage per project** — using `"productie"` on the Backend will return 0 results!
 - Compare errors between release versions using timestamp AND environment filters
 - Focus on **new errors** introduced in a release, not pre-existing ones
 - **Never correlate non-production errors with production performance issues**

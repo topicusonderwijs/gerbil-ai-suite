@@ -1,8 +1,10 @@
 # 🐛 Exception Research: JEE10 Weekend Comparison
 
-**Window:** Feb 7-8, 2026 (weekend) + full 30-day JEE10 analysis (Jan 9 — Feb 8, 2026)
+**Window:** Feb 7-8, 2026 (weekend) + version 16.6.* error analysis (Jan 9 — Feb 8, 2026)
 **Source:** SmartBear/Bugsnag
 **Note:** Somtoday Backend uses release stage `"production"` (not `"productie"` like frontend projects)
+
+> **⚠️ Platform Correction:** JEE10 was first deployed **Jan 31**, rolled back to JEE8 on **Feb 2**, and re-deployed **Feb 6 at 17:00 CET**. Errors from Jan 9-30 occurred under the **JEE8 platform**. Only errors from Jan 31-Feb 1 and Feb 6+ are from the JEE10 platform. The version `16.6.0` was a code release on Jan 9 (on JEE8), not a JEE10 deployment.
 
 ---
 
@@ -12,25 +14,28 @@
 **Errors introduced in version 16.6.*:** 562 error groups
 **Filter:** `app.release_stage = "production"`, `version.introduced_in = "16.6.*"`
 
-### ⚠️ 5xx Spike Correlation with JEE10 Release
+### ⚠️ 5xx Spike Correlation — Corrected Platform Attribution
 
-Prometheus 5xx error rate snapshots reveal a significant spike during the first week of JEE10:
+Prometheus 5xx error rate snapshots, with corrected platform attribution:
 
-| Date | 5xx Rate/sec | ~Errors/hour | Context |
-|------|-------------|-------------|---------|
-| **Jan 9** (release day) | **0.0775** | **~279** | 🔴 Release deployment |
-| **Jan 13** (WELD CDI active) | **0.0918** | **~330** | 🔴 Peak error period |
-| Jan 24 (JEE8 baseline) | 0.00446 | ~16 | ✅ Normal |
-| Jan 31 (JEE10 wk1) | 0.00335 | ~12 | ✅ Normal |
-| Feb 7 (JEE10 wk2) | 0.00502 | ~18 | ✅ Normal |
+| Date | 5xx Rate/sec | ~Errors/hour | Platform | Context |
+|------|-------------|-------------|----------|---------||
+| **Jan 9** (v16.6.0 release) | **0.0775** | **~279** | ⚠️ **JEE8** | Version 16.6.0 code release (JEE8 platform) |
+| **Jan 13** (WELD CDI active) | **0.0918** | **~330** | ⚠️ **JEE8** | Version 16.6.0 code issue (JEE8 platform) |
+| Jan 24 (JEE8 baseline) | 0.00446 | ~16 | JEE8 | ✅ Normal |
+| **Jan 31** (JEE10 deploy #1) | 0.00335 | ~12 | **JEE10** | ✅ Normal |
+| Feb 2-6 (rollback) | — | — | JEE8 | Rolled back to JEE8 |
+| **Feb 6 18:00 CET** (re-deploy +1h) | 0.00781 | ~28 | **JEE10** | Post JEE10 re-deployment |
+| **Feb 7** (JEE10 deploy #2) | 0.00502 | ~18 | **JEE10** | ✅ Normal |
+| **Feb 8 10:00 CET** | 0.00139 | ~5 | **JEE10** | ✅ Normal |
 
-**Finding:** The JEE10 release caused a **17-20x spike** in 5xx errors during Jan 9-15. This coincides perfectly with the WELD CDI injection failure (Jan 12-15) and the ResultaatAnderVakKolom EntityNotFoundException burst (Jan 9-14). By the JEE8 baseline weekend (Jan 24), error rates had fully normalized and remain stable through Feb 7-8.
+**Corrected Finding:** The Jan 9-15 5xx spike (17-20x) was caused by **version 16.6.0 code issues on the JEE8 platform**, not by JEE10. JEE10 was not deployed until Jan 31. The WELD CDI injection failure (Jan 12-15) and EntityNotFoundException bursts (Jan 9-14) all occurred under JEE8 runtime. During actual JEE10 windows (Jan 31-Feb 1 and Feb 6-8), 5xx error rates have been normal and stable.
 
 ---
 
-### 🔴 JEE10-Specific Issues
+### Version 16.6.0 Issues (Originally Misattributed to JEE10)
 
-#### 1. WELD-000713: CDI ServletContext Injection Failure — RESOLVED
+#### 1. WELD-000713: CDI ServletContext Injection Failure — RESOLVED (**JEE8 period**)
 
 | Metric | Value |
 |--------|-------|
@@ -51,13 +56,15 @@ ApplicationInfoBean.lambda$forServlet$0 (ApplicationInfoBean.java:36)
   → OrganisatieListener.fireEvent  (Hibernate @PostLoad callback)
 ```
 
-**Root cause:** Classic JEE10 CDI migration issue — `ServletContextBean` could not resolve the `ServletContext` for a cross-module class loader (`iridium-common-dao.jar` accessing `iridium-ws-rest.war` context). In JEE10/Weld, module classloader isolation is stricter.
+**Root cause:** ~~Originally attributed to JEE10 CDI migration~~ — **Correction:** This error occurred Jan 12-15, **before JEE10 was deployed** (Jan 31). This is a version 16.6.0 code issue on the JEE8 platform. The `ServletContextBean` could not resolve the `ServletContext` for a cross-module class loader (`iridium-common-dao.jar` accessing `iridium-ws-rest.war` context). Root cause is likely a code change in 16.6.0 affecting CDI bean resolution, not JEE10 runtime changes.
 
 **Organisations affected:** Carmel College West Betuwe (551 events), Carmel Lyceum Hurdegaryp (233), Lyceum Ypenburg (1), Test College (1)
 
-**Status:** ✅ Self-resolved after 3 days. Not seen since Jan 15. Likely resolved by a Wildfly/Weld warm-up cycle or classloader stabilization.
+**Status:** ✅ Self-resolved after 3 days. Not seen since Jan 15. Likely resolved by a Wildfly/Weld warm-up cycle or classloader stabilization. **Note:** Not seen during actual JEE10 runtime windows (Jan 31-Feb 1, Feb 6-8), confirming this is not a JEE10 platform issue.
 
-#### 2. Infinispan CacheEntry NullPointerException — RESOLVED
+### 🔴 Confirmed JEE10-Specific Issues
+
+#### 2. Infinispan CacheEntry NullPointerException — RESOLVED (**JEE10 period confirmed**)
 
 | Metric | Value |
 |--------|-------|
@@ -225,7 +232,7 @@ Duplicate key constraint on `swigemaakt_leerling_switoekenning_key` in `RSWIGema
 
 ### Analysis — Leerling
 
-- **"Geen huidig account-profiel gevonden"**: Highest user impact (168 users). Pre-existing since Jan 9 release. Session/profile lookup issue.
+- **"Geen huidig account-profiel gevonden"**: Highest user impact (168 users). Pre-existing since version 16.6.0 release (Jan 9, JEE8 platform). Session/profile lookup issue — not JEE10-related.
 - **HttpErrorResponse 403**: Authorization issue on `maatregeltoekenningen` endpoint — pre-existing
 - **TypeError: URL.canParse**: Relatively new (first seen Feb 6) — Safari/older browser compatibility issue
 
@@ -258,25 +265,25 @@ Duplicate key constraint on `swigemaakt_leerling_switoekenning_key` in `RSWIGema
 | Metric | Value | Status |
 |--------|-------|--------|
 | Error groups introduced in 16.6.* (production) | **562** | ⚠️ Significant |
-| 5xx spike on release day (Jan 9) | ~279 errors/hour | 🔴 Spike (resolved) |
-| 5xx spike on Jan 13 | ~330 errors/hour | 🔴 Spike (resolved) |
+| 5xx spike on release day (Jan 9) | ~279 errors/hour | ⚠️ v16.6.0 on JEE8 (not JEE10) |
+| 5xx spike on Jan 13 | ~330 errors/hour | ⚠️ v16.6.0 on JEE8 (not JEE10) |
 | 5xx rate on Feb 7 (this weekend) | ~18 errors/hour | ✅ Normal |
-| Confirmed JEE10-specific errors | **2** (WELD CDI + Infinispan) | ⚠️ Both self-resolved |
+| Confirmed JEE10-specific errors | **1** (Infinispan CacheEntry NPE only) | ✅ Self-resolved (9s burst) |
 | Critical (Error) severity in production | **0** | ✅ |
 | New errors this weekend (Feb 7-8) | **1** (ExamenVakHulpmiddel, v16.7.0) | ⚠️ Monitor |
 
 ### Key Findings
 
-1. **5xx error spikes DID correlate with the JEE10 release** — 17-20x elevated during Jan 9-15, driven by EntityNotFoundException bursts and the WELD CDI injection failure. Error rates normalized by Jan 24 and remain stable.
+1. **5xx error spikes on Jan 9-15 were version 16.6.0 code issues on JEE8**, NOT JEE10 — JEE10 was not deployed until Jan 31. The 17-20x spike was driven by EntityNotFoundException bursts and the WELD CDI injection failure, all running on JEE8 platform. Error rates normalized by Jan 24.
 
-2. **Two confirmed JEE10-specific errors**, both self-resolved:
-   - WELD-000713 CDI injection (781 events, 145 users, Jan 12-15 only)
-   - Infinispan CacheEntry NPE (129 events, 47 users, Jan 31 9-second burst)
+2. **One confirmed JEE10-specific error** (corrected from 2 after timeline review):
+   - ~~WELD-000713 CDI injection (Jan 12-15)~~ → **Reclassified as JEE8-period version 16.6.0 issue**
+   - Infinispan CacheEntry NPE (129 events, 47 users, Jan 31 9-second burst) → **Confirmed JEE10** (`BuildNumber: "30-jee10"`)
 
-3. **`$$$view` proxy proliferation** is a JEE10-specific pattern: WildFly regenerates proxy class names each deployment, causing existing errors (RollbackException, OptimisticLockException) to fragment into many error groups. This inflates the "562 introduced" count. The underlying bugs are **pre-existing** but each deployment creates a new error group.
+3. **`$$$view` proxy proliferation** occurs on each WildFly deployment, causing existing errors (RollbackException, OptimisticLockException) to fragment into many error groups. This inflates the "562 introduced in 16.6.*" count. The underlying bugs are **pre-existing** and most appeared during the JEE8 period (Jan 9-30).
 
-4. **EntityNotFoundException pattern** (ResultaatAnderVakKolom, SWIBijlage, Groepsindeling): Stale Hibernate 2nd-level cache entries after JEE10 migration. These self-resolved within 5-7 days as caches refreshed. **One new occurrence on Feb 7** (ExamenVakHulpmiddel) on version 16.7.0 — monitor.
+4. **EntityNotFoundException pattern** (ResultaatAnderVakKolom, SWIBijlage, Groepsindeling): These occurred Jan 9-22, **during JEE8 runtime** — they are stale Hibernate cache issues related to version 16.6.0 code changes, not JEE10 migration. **One new occurrence on Feb 7** (ExamenVakHulpmiddel) on version 16.7.0 during JEE10 runtime — monitor.
 
-5. **LazyInitializationException** pre-dates JEE10 (first seen Jan 6) but volume increased under 16.6.0. Possible JEE10 transaction scope boundary change. 242 users affected. Warrants investigation.
+5. **LazyInitializationException** pre-dates both JEE10 and 16.6.0 (first seen Jan 6) but volume increased under 16.6.0. May be related to code changes rather than JEE10 platform. 242 users affected. Warrants investigation.
 
-6. **This weekend (Feb 7-8) is clean** — no new JEE10-specific errors, no elevated 5xx rates. The first-week turbulence has fully settled.
+6. **Actual JEE10 error windows are clean** — during Jan 31-Feb 1 and Feb 6-8, no new JEE10-specific errors emerged and 5xx rates were normal.

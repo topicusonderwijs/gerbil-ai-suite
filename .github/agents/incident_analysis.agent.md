@@ -89,7 +89,12 @@ Execute these steps systematically, using the todo list to track progress. **Wri
 1. Parse user's incident description for timestamps, affected systems, and hypotheses
 2. Convert all timestamps to both CET and UTC
 3. Define the investigation time window (include 30 min before incident start)
-4. **Create the report directory:** `rapports/postmortem_YYYY-MM-DD_[TITLE]/research/`
+4. **Verify the deployment timeline with the user:**
+   - What version and platform is currently running in production?
+   - When was it deployed? Were there any rollbacks or re-deployments recently?
+   - Was there a platform change (e.g., JEE8 → JEE10) separate from the code version release?
+   - ⚠️ Do NOT use GitHub release tag dates or Bugsnag `first_seen` dates as deployment timestamps
+5. **Create the report directory:** `rapports/postmortem_YYYY-MM-DD_[TITLE]/research/`
 
 #### Phase 2: Database Analysis → `research/database.md`
 5. Query PgBouncer connection metrics:
@@ -144,10 +149,11 @@ Execute these steps systematically, using the todo list to track progress. **Wri
 #### Phase 7: Error & Exception Analysis → `research/exceptions.md`
 25. Query Bugsnag for errors in the incident time window
 26. Identify new errors vs pre-existing ones
-27. Extract relevant stack traces and correlate with code
-28. Search Loki for error patterns (if available)
-29. Look for elevated error rates vs baseline
-30. **SAVE** findings immediately to `research/exceptions.md`
+27. **For each error, verify it occurred during actual deployment runtime** — cross-reference `first_seen`/`last_seen` against the confirmed deployment timeline from Phase 1. Do not attribute errors to a platform change if they occurred before that platform was deployed.
+28. Extract relevant stack traces and correlate with code
+29. Search Loki for error patterns (if available)
+30. Look for elevated error rates vs baseline
+31. **SAVE** findings immediately to `research/exceptions.md`
 
 #### Phase 8: Synthesis & Final Report → `summary.md`
 31. Read all research files to correlate findings

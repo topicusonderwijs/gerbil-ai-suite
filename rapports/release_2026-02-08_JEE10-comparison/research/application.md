@@ -1,8 +1,8 @@
 # 🚀 Application Research: JEE10 Post-Release Weekend Comparison
 
 **Comparison Window:** Feb 7-8, 2026 (Sat-Sun) vs Jan 24-25, 2026 (Sat-Sun)
-**Context:** JEE10 (16.6.0) was deployed Jan 31. This is the second full weekend under JEE10.
-**Previous Weekend (Jan 31-Feb 1):** Showed critical sis-ui P99 regression (+167%).
+**Context:** JEE10 first deployed Jan 31, rolled back to JEE8 on Feb 2, **re-deployed Feb 6 17:00 CET**. This is ~40 hours into the second JEE10 deployment.
+**Previous Weekend (Jan 31-Feb 1):** Showed critical sis-ui P99 regression (+167%). Rolled back to JEE8 on Monday Feb 2.
 
 ---
 
@@ -42,20 +42,42 @@ The **critical 167% sis-ui P99 regression** observed during the first JEE10 week
 | **Sat 14:00** | 1.145s | 1.068s | -6.7% | ✅ Improved |
 | **Sun 08:00** | 1.076s | 0.268s | -75.1% | ✅ Very low |
 | **Sun 10:00** | 1.124s | **4.126s** | **+267%** | 🔴 Spike |
+| **Sun 11:00** | — | **3.727s** | — | 🔴 **Sustained** |
 | **Sun 12:00** | 1.172s | *(no data yet)* | — | — |
 
-### 🔴 Sunday Morning Spike (Feb 8, 10:00 CET)
+### 🔴 Post-Deployment Warm-Up Pattern (Feb 6 Evening)
 
-A significant P99 spike to **4.126 seconds** was observed on Sunday Feb 8 at 10:00 CET. This is notable because:
-- Saturday was consistently stable (~1.05-1.07s)
-- Sunday 08:00 CET was very low (0.268s) — possibly low traffic
-- The spike at 10:00 CET could be caused by:
-  - **Batch job execution** (scheduled jobs running Sunday morning)
-  - **Cache warming** after low-traffic overnight period
-  - **GC pause** affecting the P99 window
-  - **Actual regression** that surfaces under certain traffic patterns
+The JEE10 re-deployment at 17:00 CET on Feb 6 shows a clear warm-up pattern:
 
-**Compared to Jan 31 weekend:** The Jan 31 sis-ui P99 was consistently elevated (2.6s-3.1s across multiple Saturday samples). This Feb 8 spike appears more isolated, suggesting a transient event rather than a systemic regression.
+| Time (CET) | sis-ui P99 | Auth P99 | Traffic (req/s) | Context |
+|------------|-----------|----------|-----------------|---------||
+| **Fri 18:00** (deploy +1h) | **3.831s** | 0.523s | 1,045 | 🔴 Initial warm-up |
+| **Fri 20:00** (deploy +3h) | **3.263s** | 0.274s | 636 | ⚠️ Settling |
+| **Fri 23:00** (deploy +6h) | **0.867s** | — | low | ✅ Low traffic window |
+| **Sat 08:00** (deploy +15h) | **2.720s** | — | rising | ⚠️ Morning traffic spike |
+| **Sat 10:00** (deploy +17h) | **1.074s** | — | ~444 | ✅ Stabilized |
+| **Sat 12:00** (deploy +19h) | **1.054s** | 0.321s | ~444 | ✅ Stable |
+| **Sat 14:00** (deploy +21h) | **1.068s** | — | ~444 | ✅ Stable |
+
+**Key insight:** The JEE10 warm-up takes approximately **17 hours** under traffic to fully stabilize. This matches the Jan 31 deployment pattern (which showed 2.6-3.1s sustained through Saturday — it had less time with daytime traffic to warm up before the Saturday measurement). This warm-up will recur on every deployment and pod restart.
+
+### 🔴 Sunday Morning Spike (Feb 8, 10:00-11:00 CET) — Sustained
+
+A P99 spike was observed on Sunday Feb 8, **sustained** across multiple measurement windows:
+
+| Time (CET) | sis-ui P99 | Auth P99 | Context |
+|------------|-----------|----------|---------||
+| **Sun 08:00** | 0.268s | — | Very low traffic |
+| **Sun 10:00** | **4.126s** | — | 🔴 Spike |
+| **Sun 11:00** | **3.727s** | **0.500s** | 🔴 Still elevated |
+
+This is **not an isolated transient event** — it persists for at least one hour. Possible explanations:
+- **Overnight JIT/cache cool-down** — low overnight traffic may cause JIT-compiled code to be deoptimized, requiring re-warming
+- **Sunday batch job execution** — needs verification against scheduled job configuration
+- **GC pause chain** — needs GC log analysis
+- **Inherent JEE10 warm-up fragility** — the JVM may lose optimization state during low-traffic periods
+
+**Compared to Jan 31 weekend:** The Jan 31 sis-ui P99 was consistently elevated (2.6s-3.1s across all Saturday samples, never stabilized). This Feb 6 deployment shows improvement (Saturday stabilized at ~1.05s) but the Sunday relapse suggests **JEE10 latency stabilization is fragile** and may regress after low-traffic periods.
 
 ---
 
@@ -63,8 +85,10 @@ A significant P99 spike to **4.126 seconds** was observed on Sunday Feb 8 at 10:
 
 | Time | Jan 24 (JEE8) | Feb 7 (JEE10) | Delta |
 |------|--------------|---------------|-------|
+| Fri 18:00 CET (deploy +1h) | — | 0.523s | — (post-deploy warm-up) |
+| Fri 20:00 CET (deploy +3h) | — | 0.274s | — (settling) |
 | Sat 12:00 CET | 0.167s | 0.321s | **+92.2%** |
-| Sun 10:00 CET | *(not queried)* | 0.673s | — |
+| Sun 11:00 CET | — | 0.500s | — (Sunday spike) |
 
 The authenticator continues to show degraded P99 performance under JEE10:
 - **Jan 31 (first weekend):** +44.7% (206ms → 298ms)

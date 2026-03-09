@@ -3,7 +3,7 @@
 **Date:** 2026-02-08  
 **Comparison:** Feb 7-8, 2026 (JEE10 Week 2) vs Jan 24-25, 2026 (JEE8 Baseline)  
 **Version:** 16.6.0 (Jakarta EE 10)  
-**Context:** Second full weekend under JEE10 — follow-up to [Jan 31 rapport](../release_2026-01-31_JEE10/summary.md)  
+**Context:** Second JEE10 deployment — re-deployed Fri Feb 6 17:00 CET after week-long rollback. Follow-up to [Jan 31 rapport](../release_2026-01-31_JEE10/summary.md)  
 **Research Directory:** [research/](research/)
 
 ---
@@ -14,12 +14,12 @@ The second full weekend under JEE10 shows **significant recovery** from the crit
 
 | Aspect | Status | Details |
 |--------|--------|---------|
-| **sis-ui P99** | ✅ **Recovered** | 1.054s (was 3.12s on Jan 31, baseline 1.11s) |
+| **sis-ui P99** | ⚠️ **Partial Recovery** | Saturday stable at 1.054s; Sunday spike sustained (3.7-4.1s); post-deploy warm-up confirmed |
 | **Authenticator P99** | 🔴 **Worsening** | +92% vs JEE8 baseline (167ms → 321ms) |
-| **Heap Memory** | ✅ 🎉 **Major Improvement** | Up to 83% less heap usage across components |
+| **Heap Memory** | ✅ 🎉 **Major Improvement** | Up to 83% less heap usage across components (⚠️ traffic 50% lower — needs weekday verification) |
 | **Infrastructure** | ⚠️ **Degraded** | 1 of 3 tunnel pods missing (node01) |
-| **Errors (Production)** | ⚠️ **Nuanced** | 562 error groups in 16.6.*; 2 JEE10-specific (self-resolved); first-week spikes settled |
-| **Overall** | ✅ **Go** | Critical regression resolved; first-week error turbulence settled; authenticator needs investigation |
+| **Errors (Production)** | ✅ **Clean for JEE10** | 562 error groups in 16.6.* (most from JEE8 period); 1 confirmed JEE10-specific (self-resolved) |
+| **Overall** | ⚠️ **Conditional Go** | Saturday P99 recovered but Sunday spike sustained; authenticator worsening; needs weekday monitoring |
 
 ---
 
@@ -28,10 +28,12 @@ The second full weekend under JEE10 shows **significant recovery** from the crit
 ### Timeline
 | Date | Event |
 |------|-------|
-| 2026-01-09 | Version 16.6.0 released (JEE10) |
-| 2026-01-24/25 | **JEE8 baseline weekend** (this report's comparison target) |
-| 2026-01-31/Feb 1 | First JEE10 weekend — critical sis-ui P99 regression (+167%) |
-| **2026-02-07/08** | **Second JEE10 weekend — this report** |
+| 2026-01-09 | Version 16.6.0 released (code release, **still JEE8 platform**) |
+| 2026-01-24/25 | **JEE8 baseline weekend** (version 16.6.0 on JEE8 — this report's comparison target) |
+| 2026-01-31/Feb 1 | **First JEE10 platform deployment** — critical sis-ui P99 regression (+167%) |
+| 2026-02-02 (Mon) | **JEE10 rolled back to JEE8** for the work week |
+| **2026-02-06 17:00 CET** | **JEE10 re-deployed to production** |
+| **2026-02-07/08** | **Second JEE10 weekend — this report** (~40h since re-deployment) |
 
 ### Traffic Context
 Weekend traffic on Feb 7-8 was approximately **50% lower** than Jan 24-25:
@@ -80,9 +82,9 @@ Database connectivity remains healthy. Zero waiting connections across both JEE1
 | **authenticator** | 0.167s | 0.298s | **0.321s** | **+92.2%** | 🔴 Worsening |
 | **connect-rest** | N/A | 1.061s | **1.182s** | N/A | — |
 
-### ✅ sis-ui P99 Recovery — Key Finding
+### ⚠️ sis-ui P99 Recovery — Partial (Saturday Only)
 
-The **critical 167% sis-ui P99 regression** from Jan 31 has **fully recovered**:
+The **critical 167% sis-ui P99 regression** from Jan 31 shows **Saturday recovery** but **Sunday relapse**:
 
 | Weekend | sis-ui P99 | vs JEE8 Baseline |
 |---------|-----------|------------------|
@@ -106,11 +108,15 @@ Multiple Saturday time samples confirm the recovery is consistent:
 | **P95** | 586ms | 250ms | **-57.3%** | ✅ 🎉 Major improvement |
 | **P99** | 1.110s | 1.054s | -5.1% | ✅ Improved |
 
-**Key insight:** P95 improved by 57%, meaning the **95th percentile of requests is now more than 2x faster** under JEE10 than under JEE8.
+**Key insight:** P95 improved by 57%, meaning the **95th percentile of requests is now more than 2x faster** under JEE10 than under JEE8. ⚠️ **Note:** Traffic was ~50% lower on Feb 7 — this improvement needs verification under comparable weekday load.
 
-### ⚠️ Sunday Morning Spike (Feb 8, 10:00 CET)
+### 🔴 Sunday Morning Spike (Feb 8, 10:00-11:00 CET) — Sustained
 
-A transient P99 spike to **4.126s** was observed on Sunday Feb 8 at 10:00 CET. Unlike the Jan 31 regression (which was sustained across all Saturday samples), this appears to be an isolated event — possibly a batch job, cache warming, or GC pause. Saturday metrics were consistently stable.
+A P99 spike was observed on Sunday Feb 8, **sustained** across multiple measurement windows:
+- **10:00 CET:** 4.126s
+- **11:00 CET:** 3.727s (authenticator also elevated: 0.500s)
+
+This is **not an isolated transient event** — it persists for at least one hour. Combined with the post-deployment warm-up data (sis-ui P99 was 3.83s at 18:00 CET on Feb 6, settling to ~1.05s by Saturday 10:00), this suggests JEE10 may exhibit **periodic latency relapses** after low-traffic periods cause JIT/cache cooling. Requires investigation — check GC logs, batch job schedules, and pod events for this window.
 
 ### 🔴 Authenticator P99 — Persistent Regression
 
@@ -165,30 +171,40 @@ All components remain well below critical thresholds (<10%). The authenticator s
 
 ## 5. Error Analysis (Bugsnag)
 
-> **⚠️ Note:** Somtoday Backend uses release stage `"production"`, while Docent/Leerling use `"productie"`. Previous analysis inadvertently queried Backend with the wrong filter, returning 0 results. This section reflects corrected data.
+> **⚠️ Important Corrections:**
+> 1. Somtoday Backend uses release stage `"production"`, while Docent/Leerling use `"productie"`. Previous analysis inadvertently queried Backend with the wrong filter.
+> 2. **Version 16.6.0 was released on Jan 9 on the JEE8 platform.** JEE10 was first deployed on Jan 31, rolled back on Feb 2, and re-deployed on Feb 6 at 17:00 CET. Errors from Jan 9-30 are version 16.6.0 code issues on JEE8, **not JEE10 platform issues.**
+> 3. The actual JEE10 production windows are: **Jan 31 – Feb 1** (~2 days) and **Feb 6 17:00 CET – present** (~1.5 days). Total JEE10 runtime: ~3.5 days.
 
-### 5.1 5xx Error Spike — Release Day Correlation
+### 5.1 5xx Error Rates — Corrected Timeline
 
-Prometheus instant queries at key dates reveal a significant 5xx spike during the first JEE10 week:
+Prometheus instant queries at key dates, with corrected platform attribution:
 
-| Date | 5xx Rate/sec | ~Errors/hour | vs Baseline | Context |
-|------|-------------|-------------|-------------|---------|
-| **Jan 9** (release day) | **0.0775** | **~279** | 🔴 **17x** | Release deployment |
-| **Jan 13** (WELD CDI peak) | **0.0918** | **~330** | 🔴 **20x** | Peak error period |
-| Jan 24 (JEE8 baseline) | 0.00446 | ~16 | — baseline — | Normal weekend |
-| Jan 31 (JEE10 wk1) | 0.00335 | ~12 | ✅ -25% | Normal weekend |
-| Feb 7 (JEE10 wk2) | 0.00502 | ~18 | ✅ +12% | Normal weekend |
+| Date | 5xx Rate/sec | ~Errors/hour | Platform | Context |
+|------|-------------|-------------|----------|---------||
+| **Jan 9** (v16.6.0 release) | **0.0775** | **~279** | ⚠️ **JEE8** | Version 16.6.0 code release on JEE8 |
+| **Jan 13** (WELD CDI peak) | **0.0918** | **~330** | ⚠️ **JEE8** | Version 16.6.0 code issue on JEE8 |
+| Jan 24 (JEE8 baseline) | 0.00446 | ~16 | JEE8 | — baseline — |
+| **Jan 31** (JEE10 deploy #1) | 0.00335 | ~12 | **JEE10** | First JEE10 weekend |
+| Feb 2-6 (rollback week) | — | — | JEE8 | Rolled back to JEE8 |
+| **Feb 6 18:00 CET** (re-deploy +1h) | 0.00781 | ~28 | **JEE10** | Post JEE10 re-deployment |
+| **Feb 6 20:00 CET** (re-deploy +3h) | 0.00504 | ~18 | **JEE10** | Settling |
+| **Feb 7** (JEE10 deploy #2) | 0.00502 | ~18 | **JEE10** | Second JEE10 weekend |
+| **Feb 8 10:00 CET** | 0.00139 | ~5 | **JEE10** | Sunday morning |
+| **Feb 8 11:00 CET** | 0.00279 | ~10 | **JEE10** | Sunday morning |
 
-**Finding:** The JEE10 release **did** cause a 17-20x error spike during Jan 9-15, but error rates fully normalized before the JEE8 baseline weekend. Both comparison weekends (Jan 24 and Feb 7-8) show normal, stable 5xx rates.
+**Corrected Finding:** The Jan 9-15 5xx spike (17-20x) was caused by **version 16.6.0 code issues on the JEE8 platform**, not by JEE10. JEE10 was not deployed until Jan 31. During actual JEE10 windows (Jan 31-Feb 1 and Feb 6-8), 5xx error rates have been **normal and stable** (~5-28 errors/hour). The slight elevation at Feb 6 18:00 CET (28/hr) is expected post-deployment turbulence that settled within 2 hours.
 
-### 5.2 JEE10-Specific Errors (Backend)
+### 5.2 JEE10-Specific Errors (Backend) — Corrected
 
-Two errors are **confirmed JEE10-specific**. Both self-resolved:
+**One** error is confirmed JEE10-specific (down from 2 after timeline correction):
 
-| Error | Events | Users | Period | Root Cause |
-|-------|--------|-------|--------|------------|
-| WELD-000713 CDI injection | 781 | 145 | Jan 12-15 (3 days) | CDI module classloader isolation |
-| Infinispan CacheEntry NPE | 129 | 47 | Jan 31 (9 seconds) | L2 cache race condition |
+| Error | Events | Users | Period | Platform | Root Cause |
+|-------|--------|-------|--------|----------|------------|
+| ~~WELD-000713 CDI injection~~ | 781 | 145 | Jan 12-15 | ❌ **JEE8** | ~~CDI classloader isolation~~ → Version 16.6.0 code issue on JEE8 |
+| Infinispan CacheEntry NPE | 129 | 47 | Jan 31 (9 sec) | ✅ **JEE10** | L2 cache race condition (`BuildNumber: "30-jee10"`) |
+
+**Correction:** The WELD-000713 error (Jan 12-15) occurred **before JEE10 was deployed** (Jan 31). It is a version 16.6.0 code issue on the JEE8 platform. The original "stricter module classloader isolation under JEE10" root cause is incorrect for this timeframe.
 
 ### 5.3 Error Groups Introduced in 16.6.* — 562 Total
 
@@ -203,7 +219,7 @@ Two errors are **confirmed JEE10-specific**. Both self-resolved:
 | **Infinispan CacheEntry NPE** | 1 | 129 | 47 | ✅ Self-resolved |
 | Other (URI, Turnitin timeout, etc.) | ~534 | — | — | Mixed |
 
-**Important context:** The large "562 introduced" count is inflated by WildFly's JEE10 proxy class regeneration. Each deployment creates new `$$$viewN` proxy class names, causing pre-existing errors (RollbackException, OptimisticLockException) to appear as "new" error groups. The underlying bugs are pre-existing; only the proxy variant is new.
+**Important context:** The "562 error groups introduced in 16.6.*" represents errors introduced in **code version 16.6.0**, not errors caused by the JEE10 platform. Most of these (Jan 9–Jan 30) occurred while running on JEE8. The count is further inflated by WildFly proxy class regeneration (`$$$viewN` variants), causing pre-existing errors to appear as "new" error groups. Only errors during actual JEE10 windows (Jan 31-Feb 1 and Feb 6-present) can be attributed to the JEE10 platform.
 
 ### 5.4 This Weekend (Feb 7-8) — Production Error Summary
 
@@ -231,12 +247,12 @@ Two errors are **confirmed JEE10-specific**. Both self-resolved:
 
 | Issue from Jan 31 Report | Jan 31 Status | Feb 7 Status | Resolution |
 |--------------------------|---------------|--------------|------------|
-| sis-ui P99 +167% | 🔴 Critical | ✅ **Resolved** | Recovered to baseline (-5%) |
+| sis-ui P99 +167% | 🔴 Critical | ⚠️ **Partial** | Saturday recovered (-5%), but Sunday spike sustained (3.7-4.1s) |
 | authenticator P99 +45% | ⚠️ Degraded | 🔴 **Worsened** (+92%) | Needs investigation |
 | ws-rest P99 +10% | ⚠️ Degraded | ⚠️ Stable (+8.7%) | Acceptable |
 | 5xx error rate elevated | ⚠️ Monitor | ⚠️ Consistent | Very low absolute numbers |
-| Zero production errors | ✅ Clean | ⚠️ **Revised** | 562 error groups in 16.6.* found; 2 JEE10-specific (self-resolved) |
-| 5xx release day spike | ℹ️ Not checked | 🔴 **Confirmed** | 17-20x spike Jan 9-15, fully normalized |
+| Zero production errors | ✅ Clean | ⚠️ **Revised** | 562 error groups in 16.6.* found (most from JEE8 period); 1 confirmed JEE10-specific (Infinispan NPE, self-resolved) |
+| 5xx release day spike | ℹ️ Not checked | ⚠️ **Corrected** | Jan 9-15 spike was v16.6.0 on **JEE8**, not JEE10. JEE10 windows show normal 5xx rates |
 
 ---
 
@@ -244,54 +260,62 @@ Two errors are **confirmed JEE10-specific**. Both self-resolved:
 
 ### Go / No-Go Decision
 
-| Decision | ✅ **Go — With Monitoring** |
-|----------|---------------------------|
+| Decision | ⚠️ **Conditional Go — With Active Monitoring** |
+|----------|-----------------------------------------------|
 
 ### Rationale
 
-The critical sis-ui P99 regression that triggered a "Conditional Go" on Jan 31 has **fully resolved**. The JEE10 platform is now performing at or better than JEE8 baseline levels for the primary application component. The deeper Bugsnag analysis reveals the first JEE10 week had significant error turbulence, but this has fully settled.
+The sis-ui P99 regression from Jan 31 shows **partial recovery** on Saturday, but **Sunday data reveals a sustained latency relapse** (3.7-4.1s). The JEE10 platform has only been running for ~40 hours since re-deployment (Feb 6 17:00 CET), following a week-long rollback to JEE8. More runtime is needed to confirm stability.
 
 **Positive Findings:**
-- ✅ sis-ui P99 recovered — now **5% better** than JEE8 baseline
-- ✅ sis-ui P95 **57% faster** than JEE8 — significant improvement
-- ✅ 🎉 Heap memory usage reduced by up to **83%** — major platform benefit
-- ✅ Both JEE10-specific errors (WELD CDI, Infinispan) **self-resolved** within days
-- ✅ First-week 5xx spike (17-20x) fully normalized — Feb 7-8 rates are normal
+- ✅ sis-ui P99 Saturday comparison: recovered to **-5%** vs JEE8 baseline
+- ✅ sis-ui P95 on Saturday: **57% faster** than JEE8 (⚠️ traffic was 50% lower — needs weekday verification)
+- ✅ 🎉 Heap memory usage reduced by up to **83%** (⚠️ partially explained by 50% lower traffic)
+- ✅ JEE10-specific Infinispan CacheEntry error **self-resolved** (9-second burst on Jan 31)
+- ✅ 5xx error rates normal during actual JEE10 windows
 - ✅ Database connections healthy, zero waiting
 - ✅ Status code distributions proportionally identical
 
 **Open Issues:**
+- 🔴 **Sunday P99 spike sustained** (4.126s at 10:00 CET, 3.727s at 11:00 CET) — not isolated, needs investigation
 - 🔴 Authenticator P99 regression worsening (+92%) — requires investigation
 - 🔴 Missing tunnel pod on node01 — reduced HA capacity by 33%
-- ⚠️ 562 error groups introduced in 16.6.* — mostly inflated by WildFly proxy regeneration, but LazyInitializationException (242 users) warrants attention
-- ⚠️ New EntityNotFoundException (ExamenVakHulpmiddel) appeared Feb 7 on v16.7.0 — monitor for recurrence
-- ⚠️ 5xx error rate ~3x higher relative (but ~18 errors/hour absolute)
-- ⚠️ Transient Sunday morning P99 spike (isolated event)
+- ⚠️ Post-deployment warm-up pattern confirmed (P99 3.83s → 1.05s over ~16h) — will recur on pod restarts
+- ⚠️ Only ~3.5 days total JEE10 runtime — insufficient for confident stability assessment
+- ⚠️ Traffic was ~50% lower than baseline — P99 and heap improvements may not hold under full weekday load
+- ⚠️ LazyInitializationException (242 users) warrants attention
+- ⚠️ New EntityNotFoundException (ExamenVakHulpmiddel) appeared Feb 7 on v16.7.0 — monitor
 
 ### Recommendations
 
-1. **🔍 Critical:** Investigate authenticator P99 regression — worsening trend from +45% → +92%
-2. **🔧 Critical:** Investigate/restore missing tunnel pod on som-k8s-node01 before weekday traffic
-3. **📊 High:** Investigate `LazyInitializationException` in `GroepsindelingService.deleteGroepsindeling:345` — 242 users affected, pre-dates JEE10 but volume increased under 16.6.0. Check if JEE10 transaction/CDI scope changes affected Hibernate session lifecycle.
-4. **📊 Medium:** Monitor the new `ExamenVakHulpmiddel` EntityNotFoundException (Feb 7, v16.7.0) — stale collection cache pattern
-5. **📊 Medium:** Monitor Sunday morning spike pattern — check for batch jobs or GC pauses
-6. **📈 Low:** The `$$$view` proxy proliferation is cosmetic (WildFly class regeneration) but creates noise in Bugsnag. Consider adding a Bugsnag grouping rule to collapse view variants.
-7. **📈 Low:** Continue weekend-to-weekend monitoring for one more cycle to confirm stability
-8. **✅ Positive:** The JEE10 heap memory improvements should reduce infrastructure costs and improve GC behavior long-term
+1. **� Critical:** Investigate Sunday P99 spike (sustained 3.7-4.1s on Feb 8, 10:00-11:00 CET) — check GC logs, pod events, batch job schedules for this window
+2. **🔴 Critical:** Investigate authenticator P99 regression — worsening trend from +45% → +92%
+3. **🔧 Critical:** Investigate/restore missing tunnel pod on som-k8s-node01 before weekday traffic
+4. **📊 High:** Monitor weekday performance closely (Mon Feb 9) — Saturday comparisons are confounded by ~50% lower traffic. Weekday will be the true JEE10 performance test.
+5. **📊 High:** Characterize the JEE10 warm-up pattern (P99 3.83s → 1.05s over ~16h) — this will recur on every deployment and pod restart. Consider pre-warming strategies.
+6. **📊 High:** Investigate `LazyInitializationException` in `GroepsindelingService.deleteGroepsindeling:345` — 242 users affected, pre-dates JEE10 but volume increased under 16.6.0.
+7. **📊 Medium:** Monitor the new `ExamenVakHulpmiddel` EntityNotFoundException (Feb 7, v16.7.0) — stale collection cache pattern
+8. **📈 Low:** The `$$$view` proxy proliferation is cosmetic (WildFly class regeneration) but creates noise in Bugsnag. Consider adding a Bugsnag grouping rule to collapse view variants.
+9. **📈 Low:** The JEE10 heap memory improvements are promising but need verification under full weekday traffic
 
-### Jan 31 "Performance Paradox" — Resolved (with Caveats)
+### Jan 31 "Performance Paradox" — Partially Resolved
 
-The Jan 31 report identified a "performance paradox" where P99 latency increased 167% with zero application errors. Deeper Bugsnag analysis now reveals this was **not actually zero errors** — the original analysis used the wrong release stage filter for the Backend project. The corrected picture:
+The Jan 31 report identified a "performance paradox" where P99 latency increased 167% with zero application errors.
 
-- **Jan 9-15:** Significant error turbulence (17-20x 5xx spike) including WELD CDI injection failures and stale cache EntityNotFoundExceptions
-- **Jan 15-24:** Errors self-resolved, 5xx normalized
-- **Jan 31:** P99 spike likely caused by JVM warm-up/JIT differences + Infinispan cache race (129 errors in 9 seconds)
-- **Feb 7-8:** Full recovery — performance at or better than JEE8 baseline
+**Critical Correction:** The Jan 9-15 error turbulence (WELD CDI injection, EntityNotFoundException bursts) occurred under **version 16.6.0 on the JEE8 platform**, not under JEE10. JEE10 was first deployed on Jan 31. These errors are version 16.6.0 code issues unrelated to the JEE10 platform.
+
+The corrected JEE10 picture:
+- **Jan 31 (JEE10 deploy #1):** P99 2.6-3.1s sustained + Infinispan CacheEntry NPE (129 events, 9s burst) — confirmed JEE10-specific
+- **Feb 2 (rollback):** JEE10 rolled back to JEE8 for the work week
+- **Feb 6 17:00 CET (JEE10 deploy #2):** P99 3.83s post-deployment, settling to ~1.05s by Saturday 10:00 (~16h warm-up)
+- **Feb 7 Saturday:** Stable P99 at ~1.05s — recovery from Jan 31 pattern
+- **Feb 8 Sunday:** P99 relapse to 3.7-4.1s — not fully stable
 
 **Updated conclusions:**
-- The first JEE10 week had genuine error issues (not "zero errors"), but they self-healed
-- The P99 regression was still likely JVM warm-up related (the error patterns don't explain latency directly)
-- **Lesson learned:** Always verify Bugsnag release stage filters per project (`"production"` vs `"productie"`)
+- The Jan 31 P99 regression is a JEE10 **warm-up / JIT compilation** issue that resolves over ~16 hours under traffic
+- The Feb 6 re-deployment confirms the warm-up pattern (3.83s → 1.05s)
+- The Sunday relapse suggests latency instability persists beyond initial warm-up, possibly triggered by low-traffic periods
+- **Lesson learned:** Always verify Bugsnag release stage filters per project (`"production"` vs `"productie"`). Always verify deployment timeline before attributing errors to platform changes.
 
 ---
 

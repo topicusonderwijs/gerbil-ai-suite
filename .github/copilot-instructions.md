@@ -224,6 +224,56 @@ For context when analyzing database-related incidents:
 - **Missing data:** Explicitly state "Data unavailable from [Source]" rather than omitting
 - **Metrics tables:** Include trend indicators (✅ Normal, ⚠️ Elevated, 🔴 Critical)
 
+## ⚠️ Deployment Timeline Verification (Critical)
+
+**Code version release ≠ platform deployment.** A version can be built and tagged in GitHub weeks before it is deployed to production, or deployed on a different runtime platform than expected.
+
+### Rules
+
+1. **Never assume deployment dates from metadata.** Bugsnag's `first_seen` date, GitHub's release creation date, and the Bugsnag `version.introduced_in` filter all reflect when a **code version** first appeared in an environment — NOT when a specific platform (e.g., JEE10) was deployed.
+
+2. **Always ask the user to confirm the deployment timeline** before writing any report. Specifically ask:
+   - When was the release deployed to production? (exact date + time + timezone)
+   - Was there a platform change (e.g., JEE8 → JEE10) separate from the code release?
+   - Were there any **rollbacks** between deployment and now?
+   - If rolled back: when was it rolled back, and when was it re-deployed?
+
+3. **Document the full deployment timeline** in every rapport, including:
+   - Code version release date (GitHub tag)
+   - Actual production deployment date(s)
+   - Any rollback periods (with dates)
+   - Re-deployment dates
+   - Which platform/runtime was active during each period
+
+4. **Scope Bugsnag error analysis to actual deployment windows.** If a platform migration (e.g., JEE10) was only live during specific windows, only attribute errors from those windows to the platform. Errors from other periods belong to the code version, not the platform.
+
+5. **Never label an error as "platform-specific" unless it occurred during actual platform runtime.** Cross-reference every error's `first_seen`/`last_seen` dates against the confirmed deployment timeline.
+
+### Example: Version vs Platform
+```
+Version 16.6.0:
+  - Jan 9:  Code released on JEE8 platform    ← errors here are "v16.6.0 on JEE8"
+  - Jan 31: Deployed on JEE10 platform         ← errors here are "JEE10-specific" candidates
+  - Feb 2:  Rolled back to JEE8                ← errors here are "v16.6.0 on JEE8" again
+  - Feb 6:  Re-deployed on JEE10               ← errors here are "JEE10-specific" candidates
+```
+Bugsnag `version.introduced_in = "16.6.*"` returns ALL of these. You MUST filter by date to isolate platform-specific errors.
+
+## ⚠️ Performance Comparison Integrity
+
+### Traffic Normalization
+When comparing metrics across time windows with **different traffic volumes**, always:
+
+1. **Report the traffic level alongside every P99/P95 comparison.** Never present latency deltas without noting the traffic delta.
+2. **Flag comparisons with >20% traffic difference** as unreliable for latency conclusions. Lower traffic naturally reduces P99 due to less contention, fewer GC pauses, and lower queue depths.
+3. **Prefer weekday-to-weekday or same-traffic-level comparisons** over weekend-to-weekend when traffic differs significantly.
+4. **Heap memory and traffic are non-linearly related.** A 50% traffic drop can cause >80% heap reduction due to fewer active sessions, smaller caches, and more aggressive GC. Never attribute heap improvements solely to platform changes without controlling for traffic.
+
+### Measurement Stability
+- `irate(...[1m])` uses only the last 2 data points — it is sensitive to the exact query timestamp. For point-in-time comparisons, prefer `rate(...[5m])` or take multiple samples and report the range.
+- When reporting a metric at a specific time, always take **at least 3 samples** (e.g., 10:00, 12:00, 14:00) to confirm the reading is not an outlier.
+- If a single data point shows an anomaly (spike or dip), **query adjacent timestamps** (±1h) before declaring it "isolated" or "transient."
+
 ## Credentials Setup
 
 If MCP tools aren't working, guide users to run:

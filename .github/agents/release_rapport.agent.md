@@ -50,6 +50,19 @@ The `summary.md` is generated LAST by synthesizing all research files into the f
 
 Execute these steps systematically, using the todo list to track progress. **Write research files as you complete each phase.**
 
+#### Phase 0: Deployment Timeline Verification (MANDATORY)
+**Before collecting ANY data, confirm the deployment timeline with the user.**
+
+1. Ask the user to confirm:
+   - **Exact deployment date and time** (with timezone) to production
+   - **Was there a platform/runtime change** (e.g., JEE8 → JEE10) separate from the code version release?
+   - **Were there any rollbacks?** If yes: when was it rolled back, and when was it re-deployed?
+   - **What is running in production right now?** (version + platform)
+2. Do NOT use GitHub release tag dates or Bugsnag `first_seen` dates as the deployment timestamp — these reflect when the code version was created, not when it was deployed to production on a specific platform.
+3. Document the confirmed deployment timeline at the top of every research file and in the summary.
+
+> **Why this matters:** A version like `16.6.0` can be released on Jan 9 (on JEE8) but only deployed on the JEE10 platform on Jan 31. Errors between Jan 9-30 would be code issues on JEE8, not JEE10 platform issues. Skipping this step has caused incorrect root cause attribution in past reports.
+
 #### Phase 1: Context Gathering & Setup
 1. Ask GitHub for the latest release tag in the `topicusonderwijs/iridium` repo
 2. Identify the previous release tag for comparison
@@ -253,10 +266,18 @@ Execute these steps systematically, using the todo list to track progress. **Wri
 # 🐛 Exceptions Research: Release [VERSION]
 
 **Release Time Window:** YYYY-MM-DD HH:MM - HH:MM CET
+**Actual Production Deployment:** [Confirmed date/time from Phase 0]
+**Platform:** [e.g., JEE8 / JEE10]
+**Rollbacks:** [Any rollback periods — dates and platforms]
 **Bugsnag Projects:** Somtoday, Somtoday docent, Somtoday leerling
 **Environment Filters:**
 - Somtoday Backend: `app.release_stage = "production"`
 - Somtoday Docent/Leerling: `app.release_stage = "productie"`
+
+## Deployment Timeline (Confirmed with User)
+| Date | Event | Platform |
+|------|-------|----------|
+| | | |
 
 ## Stability Scores
 
@@ -273,9 +294,9 @@ Execute these steps systematically, using the todo list to track progress. **Wri
 | | | | |
 
 ## NEW Errors (First Seen in This Release)
-| Error Class | Project | Count | Impact |
-|-------------|---------|-------|--------|
-| | | | |
+| Error Class | Project | Count | Impact | Platform at Time of Error |
+|-------------|---------|-------|--------|---------------------------|
+| | | | | [JEE8/JEE10 — verify against deployment timeline] |
 
 ## Top Issues
 | Issue | Events | Users Affected |
@@ -369,3 +390,7 @@ The `summary.md` is the final release report that synthesizes all research files
 * Do not hallucinate metrics. If the MCP returns no data, document it in the research file.
 * **Write research files immediately after each data collection phase** - do not accumulate data.
 * The `summary.md` should reference and link to research files for detailed data.
+* **Never attribute errors to a platform change without verifying the error occurred during actual platform runtime.** Cross-reference every error's `first_seen`/`last_seen` against the confirmed deployment timeline from Phase 0.
+* **Always report traffic levels alongside latency comparisons.** If traffic differs by >20% between comparison windows, flag latency conclusions as unreliable and recommend verification under matched load.
+* **Never dismiss a latency spike as "isolated" or "transient" from a single data point.** Always query ±1h adjacent timestamps to verify duration. If a spike persists for >30 minutes, classify it as "sustained."
+* **Bugsnag `version.introduced_in` filters by code version, not deployment date.** Errors matching this filter may have occurred on a different platform or during a rollback period. Always cross-reference dates.

@@ -11,7 +11,9 @@
 
 ## 1. Executive Summary
 
-Starting at 09:01 CET on March 9, 2026, the authenticator service began failing to connect to rest-auth, triggering a **cascade failure** that saturated PgBouncer connection pools and degraded all production services. All major components (docent-rest, ws-rest, sis-ui, authenticator) hit the 5-second timeout ceiling, generating **243 client-abort errors (499) per second** at peak. The platform self-recovered around 13:00 CET as traffic naturally decreased and connection pools drained. Root cause investigation points to **rest-auth connectivity failure** as the initial trigger, which led to connection pool exhaustion on PgBouncer, causing a system-wide cascade.
+Starting at 09:01 CET on March 9, 2026, the authenticator service began failing to connect to rest-auth, triggering a **cascade failure** that saturated PgBouncer connection pools and degraded all production services. All major components (docent-rest, ws-rest, sis-ui, authenticator) hit the 5-second timeout ceiling, generating **273 client-abort errors (499) per second** at peak across **6+ recurring failure waves** from 09:51 to 13:00 CET. The platform self-recovered around 13:00 CET as traffic naturally decreased and connection pools drained.
+
+Root cause investigation points to **rest-auth connectivity failure** as the initial trigger, with the cascade amplified by connections being held longer than normal (waiting connections 5.7x baseline). Week-prior comparison confirmed that PgBouncer active connection patterns were within normal range — the anomaly was in connection *duration*, not connection *count*. The recurring ~30-minute wave pattern suggests a self-reinforcing cycle of timeout → retry → pool pressure → timeout.
 
 ---
 
@@ -21,7 +23,7 @@ Starting at 09:01 CET on March 9, 2026, the authenticator service began failing 
 |------------|------------|-------|
 | 08:32 | 07:32 | EJBTransactionRolledbackException on sis-ui (EntityManager closed — early warning?) |
 | **09:01** | **08:01** | **⚡ authenticator→rest-auth ConnectTimeoutException begins (155,908 total events)** |
-| 09:02 | 08:02 | `landelijk_productie` DB user spikes to 629 connections (25x baseline of ~25) |
+| 09:02 | 08:02 | `landelijk_productie` DB user at 629 connections (normal oscillation pattern — see week-prior comparison) |
 | 09:16 | 08:16 | DNS resolution for `prod-rest-auth` fails (UnknownHostException, 894 events) |
 | **09:50** | **08:50** | **PgBouncer waiting connections appear on pg-prod-w16 — user-visible impact begins** |
 | 09:52 | 08:52 | PgBouncer server active connections spike to 366 |
@@ -62,13 +64,19 @@ Starting at 09:01 CET on March 9, 2026, the authenticator service began failing 
 
 ### 3.2 Per-User Connection Breakdown (pg-prod-w16)
 
-| User | Baseline | Peak | Peak Time (CET) | Multiplier |
+| User | Baseline (Mar 2) | Incident Peak (Mar 9) | Peak Time (CET) | Status |
 |------|:---:|:---:|:---:|:---:|
-| **landelijk_productie** | ~25 | **629** | 09:02 | **25x** 🔴 |
-| productie | ~700 | ~3,500 | 12:03 | 5x 🔴 |
-| productie_readonly | ~200 | ~1,000 | 11:00 | 5x 🔴 |
-| parro_productie | ~40 | ~120 | 11:00 | 3x ⚠️ |
-| audit_productie | ~15 | ~45 | 11:00 | 3x ⚠️ |
+| **landelijk_productie** | 30–656 oscillating | **688** | 11:23 | ✅ Normal range |
+| productie | ~700 | ~3,500 | 12:03 | 🔴 5x |
+| productie_readonly | ~200 | ~1,000 | 11:00 | 🔴 5x |
+| parro_productie | ~40 | ~120 | 11:00 | ⚠️ 3x |
+| audit_productie | ~15 | ~45 | 11:00 | ⚠️ 3x |
+
+> **⚠️ CORRECTION:** Week-prior comparison (March 2) revealed that `landelijk_productie` normally oscillates between 30–656 connections in regular waves every 5–15 minutes (peak 656 at 09:30 CET on March 2). The March 9 peak of 688 was **within normal range**, not a 25x anomaly. The original "~25 baseline" was a momentary post-deployment trough, not the true steady-state.
+>
+> **The real anomaly was WAITING connections:** March 2 peak waiting = 6; March 9 peak waiting = 34 (5.7x). This indicates connections were held longer due to the cascade.
+>
+> See [research/week_prior_comparison.md](research/week_prior_comparison.md) for full data.
 
 ### 3.3 Request Latency (P99)
 
@@ -128,10 +136,10 @@ Starting at 09:01 CET on March 9, 2026, the authenticator service began failing 
    - **Evidence:** Client active connections went from 1,919 (09:00) to 5,849 (12:03) on pg-prod-w16; waiting connections appeared at exactly 09:50 CET (peaking at 86)
    - **Impact:** Database connection starvation caused all services to block, unable to complete transactions
 
-3. **Anomalous `landelijk_productie` Connection Spike**
-   - **Evidence:** This DB user spiked to 629 connections at 09:02 CET (25x normal baseline of ~25), exactly 1 minute after the first ConnectTimeoutException
-   - **Impact:** This user alone consumed ~12% of the total connection pool limit, accelerating pool exhaustion
-   - **Open question:** Is `landelijk_productie` used by rest-auth or authenticator? Could this be a retry storm?
+3. **PgBouncer Waiting Connection Spike (Connection Duration Anomaly)**
+   - **Evidence:** Waiting connections peaked at 34 on March 9 vs peak of 6 on March 2 baseline (5.7x). Four users exceeded 10 waiting: `landelijk_productie` (34), `revolutionaryrunner` (33), `consciousrhythm` (28), `noblesuccess` (26)
+   - **Impact:** Connections held longer due to blocked transactions, causing pool contention even though active connection counts were within normal range
+   - **CORRECTION:** The `landelijk_productie` active connection spike to 629 at 09:02 CET was **NOT anomalous** — week-prior data shows this user regularly oscillates between 30–656 connections (peak 656 on March 2 at 09:30 CET)
 
 4. **Thread/Request Accumulation on docent-rest**
    - **Evidence:** Active users grew from ~150 to 13,833 (92x) — requests entered docent-rest but could not complete (blocked on DB)
@@ -157,8 +165,8 @@ Starting at 09:01 CET on March 9, 2026, the authenticator service began failing 
 └──────────────────────────────┬──────────────────────────────────┘
                                ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│ 2. authenticator retries → connection pool consumption (09:02)  │
-│    landelijk_productie: 25 → 629 connections (25x)              │
+│ 2. Connections held longer → waiting queue builds (09:50)       │
+│    Waiting: 0 → 34 (5.7x baseline); active in normal range     │
 └──────────────────────────────┬──────────────────────────────────┘
                                ↓
 ┌─────────────────────────────────────────────────────────────────┐
@@ -252,7 +260,8 @@ All 8 docent-rest pod IPs received ETIMEDOUT errors from the frontend:
 ### Recommended Additional Monitoring
 1. **Expose thread pool metrics** — `wildfly_io_*` metrics are critical for diagnosing thread exhaustion
 2. **PgBouncer connection alerts** — alert when active connections exceed 80% of limit (4,000+)
-3. **Per-user connection monitoring** — alert when any single DB user exceeds 100 connections
+3. **PgBouncer waiting connection monitoring** — alert when waiting connections exceed 10 (normal peak is 6)
+4. **Per-user connection monitoring** — alert when any single DB user exceeds baseline peak by >50%
 4. **Active users alert** — alert when `wildfly_request_active_users_5m` exceeds 5x normal for any component
 
 ---
@@ -269,13 +278,15 @@ All 8 docent-rest pod IPs received ETIMEDOUT errors from the frontend:
 - **No pods crashed or restarted** — the issue was functional degradation (I/O blocked), not infrastructure failure
 
 ### 7.2 Probable 🔶
-- **rest-auth connectivity failure (09:01 CET) was the initial trigger** — 155,908 ConnectTimeoutExceptions is the earliest high-volume error, and the `landelijk_productie` connection spike at 09:02 CET directly correlates
-- **Retry storms amplified the failure** — the massive error count suggests aggressive retries that consumed additional DB connections
+- **rest-auth connectivity failure (09:01 CET) was the initial trigger** — 155,908 ConnectTimeoutExceptions is the earliest high-volume error
+- **The cascade mechanism was connection duration, not connection count** — week-prior comparison shows active connection levels were normal; the anomaly was waiting connections (5.7x) indicating blocked transactions
+- **Retry storms amplified the failure** — the massive error count suggests aggressive retries that held connections longer
+- **6+ recurring failure waves (~30-min cycle)** suggest a self-reinforcing pattern: timeout → retry → pool pressure → timeout
 - **The system was under stress before the main trigger** — sis-ui P99 was already at 2.9s at 09:00 CET (vs 1.1s baseline)
 
 ### 7.3 Uncertain ❓
 - **Why did rest-auth become unreachable at 09:01 CET?** — Was it a deployment, scaling event, network partition, or pod failure? This is the critical missing piece.
-- **What is the `landelijk_productie` DB user and why did it spike?** — Is it used by rest-auth/authenticator? Is the 25x connection spike a retry mechanism?
+- **~~What is the `landelijk_productie` DB user and why did it spike?~~** — **RESOLVED:** Week-prior comparison shows the connection pattern is normal oscillation (30–656), not incident-related. The user still warrants investigation for its high connection consumption, but it was not a contributing factor to this incident.
 - **Was there a manual intervention** during the incident that caused the brief recovery at 10:30 CET?
 - **Was the system already degraded before 09:00 CET?** — The elevated sis-ui latency and EJBTransactionRolledbackException at 08:32 need investigation
 
@@ -288,7 +299,7 @@ All 8 docent-rest pod IPs received ETIMEDOUT errors from the frontend:
 | Action | Owner | Status |
 |--------|-------|--------|
 | Investigate why rest-auth was unreachable at 09:01 CET (check deployment logs, pod events) | Platform team | ⬜ |
-| Identify the `landelijk_productie` DB user purpose and connection behavior | Database team | ⬜ |
+| ~~Identify the `landelijk_productie` DB user purpose and connection behavior~~ | Database team | ✅ Resolved — normal oscillation pattern confirmed by week-prior comparison |
 | Review and reduce authenticator→rest-auth retry configuration | Backend team | ⬜ |
 | Verify PgBouncer `max_client_conn` settings meet current load requirements | Database team | ⬜ |
 
@@ -376,11 +387,15 @@ cloudflared_tunnel_ha_connections{kubernetes_cluster="somtoday"}
 | [research/exceptions.md](research/exceptions.md) | Bugsnag error correlation (backend + frontend) |
 | [research/kubernetes.md](research/kubernetes.md) | Pod health, node status, DNS issues |
 | [research/cloudflare.md](research/cloudflare.md) | Tunnel health — ruled out as factor |
+| [research/week_prior_comparison.md](research/week_prior_comparison.md) | **Comprehensive March 2 vs March 9 comparison — corrects original landelijk_productie analysis** |
 
 ---
 
 **Report Generated:** 2026-03-09  
+**Last Updated:** 2026-03-09 (Week-prior comparison corrections)  
 **Analysis Period:** 08:00 - 14:00 CET  
 **Analyst:** AI-assisted (GitHub Copilot) — requires human review and deployment timeline verification  
 
 ⚠️ **Critical follow-up needed:** The root trigger (why rest-auth became unreachable at 09:01 CET) remains unconfirmed. This report documents the cascade from that point forward, but the initial cause requires investigation of rest-auth deployment logs and pod events.
+
+⚠️ **Key correction (week-prior comparison):** The original analysis identified a "25x landelijk_productie connection spike" as a contributing factor. Week-prior data (March 2) shows this is **normal oscillation behavior** (30–656 connections). The actual anomaly was in **waiting connections** (5.7x baseline), indicating the cascade mechanism was connection *duration*, not connection *count*.

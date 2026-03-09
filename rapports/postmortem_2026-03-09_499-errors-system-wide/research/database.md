@@ -122,7 +122,9 @@ Top consumers at peak. These represent per-school/tenant database users:
 | noblesuccess_productie | 137 | 11:42 | 68 | 95 | 106 | 116 |
 | mainhabit_productie | 135 | 10:32 | 79 | 101 | 127 | 86 |
 
-**Note:** `landelijk_productie` (sis-ui-landelijk component) consumed **629 connections** at 09:02 CET — abnormally high, 25x its baseline of ~25 connections. This occurred ~48 minutes before the main incident onset at 09:50 CET and may have been a precursor event.
+**⚠️ CORRECTION (based on week-prior comparison):** The `landelijk_productie` spike to 629 at 09:02 CET was **NOT anomalous**. On March 2 (baseline Monday), this user exhibits the same oscillation pattern: 30-656 connections in regular waves every 5-15 minutes, peaking at 656 at 09:30 CET. The "~25 baseline" was a momentary post-deployment trough, not the true steady-state. See [week_prior_comparison.md](week_prior_comparison.md) for full data.
+
+**However:** The WAITING connections were anomalous. March 2 had peak waiting of 6; March 9 reached 34 (5.7x). This indicates connections were held longer due to the cascade failure, not that more connections were being created.
 
 ## Queries Used
 

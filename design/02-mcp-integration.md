@@ -12,7 +12,7 @@ The existing VS Code workflow uses two MCP servers over `stdio` (subprocess pipe
 
 | Server | Current command | Transport |
 |---|---|---|
-| Grafana | `docker run -i --rm mcp/grafana -t stdio` | stdio |
+| Grafana | `docker run -i --rm grafana/mcp-grafana -t stdio` | stdio |
 | SmartBear / Bugsnag | `npx -y @smartbear/mcp@latest` | stdio |
 | GitHub | VS Code built-in Copilot (no config file) | internal |
 
@@ -34,19 +34,19 @@ In Kubernetes, `stdio` subprocesses in the main container are difficult to manag
 
 ### 3.1 Grafana MCP (HTTP/SSE — standalone Deployment)
 
-**Image:** `mcp/grafana` (Docker Hub or private mirror)  
+**Image:** `grafana/mcp-grafana` (Docker Hub)  
 **Transport flag:** `-t sse`  
-**Port:** `8080` (default SSE port for Grafana MCP)
+**Port:** `8000` (default SSE port for Grafana MCP)
 
 **Kubernetes Deployment sketch:**
 
 ```yaml
 containers:
   - name: grafana-mcp
-    image: mcp/grafana:latest
+    image: grafana/mcp-grafana:latest
     args: ["-t", "sse"]
     ports:
-      - containerPort: 8080
+      - containerPort: 8000
     env:
       - name: GRAFANA_URL
         valueFrom:
@@ -65,7 +65,7 @@ containers:
 ```python
 grafana_client = MCPClient(
     transport="sse",
-    url="http://grafana-mcp-service.gerbil.svc.cluster.local:8080/sse",
+    url="http://grafana-mcp-service.gerbil.svc.cluster.local:8000/sse",
 )
 ```
 
@@ -77,7 +77,7 @@ grafana_client = MCPClient(
 
 **Package:** `@smartbear/mcp@latest` (npx, Node.js)  
 **Transport:** stdio inside the sidecar, exposed as HTTP/SSE to the agent via [mcp-proxy](https://github.com/sparfenyuk/mcp-proxy)  
-**Bridge mechanism:** `mcp-proxy` runs as a second process inside the sidecar container. It spawns the SmartBear MCP process over stdio and exposes it as an SSE endpoint on a Unix domain socket. The `gerbil-agent` connects to this socket, making the integration identical to the SSE pattern used for Grafana and GitHub.
+**Bridge mechanism:** `mcp-proxy` runs as a second process inside the sidecar container. It spawns the SmartBear MCP process over stdio and exposes it as an HTTP endpoint on a TCP localhost port (`8081`). Since containers in the same pod share the network namespace, the `gerbil-agent` connects via `http://localhost:8081`, making the integration identical to the HTTP pattern used for Grafana and GitHub.
 
 This approach was chosen over the alternatives (direct subprocess spawn, shared PID namespace) because it:
 - Keeps the Node.js runtime fully isolated in the sidecar — `gerbil-agent` requires only Python.
@@ -92,12 +92,14 @@ See [`ADR-005`](./09-adr/adr-005-smartbear-stdio-bridge.md) for the full decisio
 containers:
   - name: smartbear-mcp
     image: ghcr.io/topicusonderwijs/smartbear-mcp-bridge:latest
-    # Custom image: node:22-slim + mcp-proxy + @smartbear/mcp
+    # Custom image: ghcr.io/sparfenyuk/mcp-proxy (Python) + Node.js + @smartbear/mcp
     # Entrypoint: mcp-proxy wraps SmartBear stdio and exposes SSE
     command:
       - mcp-proxy
-      - --listen
-      - unix:///shared/smartbear.sock
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8081"
       - --
       - npx
       - "-y"
@@ -108,52 +110,38 @@ containers:
           secretKeyRef:
             name: smartbear-mcp-secret
             key: BUGSNAG_AUTH_TOKEN
-    volumeMounts:
-      - name: mcp-bridge-socket
-        mountPath: /shared
 ```
 
-The `gerbil-agent` container mounts the same `emptyDir` volume:
-
-```yaml
-    - name: gerbil-agent
-      # ... (other config)
-      volumeMounts:
-        - name: mcp-bridge-socket
-          mountPath: /shared
-
-volumes:
-  - name: mcp-bridge-socket
-    emptyDir: {}
-```
+No shared volumes are needed — containers in the same pod share the network namespace and the agent connects directly via `localhost:8081`.
 
 **LangGraph client config:**
 
 ```python
 smartbear_client = MCPClient(
     transport="sse",
-    url="unix:///shared/smartbear.sock/sse",
+    url="http://localhost:8081/sse",
 )
 ```
 
-> **Note:** The custom bridge image (`smartbear-mcp-bridge`) is built in CI from a simple Dockerfile that installs `mcp-proxy` (Go binary) and `@smartbear/mcp` (npm). If SmartBear publishes native SSE support in a future release, the sidecar can be replaced with a standalone Deployment and the Unix socket bridge removed — no changes to graph nodes required.
+> **Note:** The custom bridge image (`smartbear-mcp-bridge`) is built in CI from a Dockerfile based on `ghcr.io/sparfenyuk/mcp-proxy:latest` (a Python package, not a Go binary) with Node.js added for `@smartbear/mcp`. If SmartBear publishes native HTTP transport in a future release, the sidecar can be replaced with a standalone Deployment — no changes to graph nodes required.
 
 ---
 
 ### 3.3 GitHub MCP (HTTP/SSE — standalone Deployment)
 
-**Package:** `@modelcontextprotocol/server-github` (official MCP reference server)  
-**Transport:** HTTP/SSE  
-**Port:** `3000` (default)
+**Package:** `ghcr.io/github/github-mcp-server` (official GitHub MCP server — Go binary, not an npm package)  
+**Transport:** Streamable HTTP (HTTP transport mode added in v0.x)  
+**Port:** `8082` (default; PR #1849 source-verified)
+
+> ✅ **Verified (2025):** The previous spec referenced `@modelcontextprotocol/server-github` (an early Node.js reference implementation). The current official GitHub MCP server is a **Go binary** at `ghcr.io/github/github-mcp-server`. HTTP/Streamable-HTTP mode was added in PR #1849 via the **`http` subcommand** (not a `--transport` flag). Default port is **8082**. The MCP handler is mounted at `/` (root) using `mcp.NewStreamableHTTPHandler`.
 
 **Kubernetes Deployment sketch:**
 
 ```yaml
 containers:
   - name: github-mcp
-    image: node:22-slim
-    command: ["npx", "-y", "@modelcontextprotocol/server-github@latest"]
-    args: ["--transport", "sse", "--port", "3000"]
+    image: ghcr.io/github/github-mcp-server:latest
+    args: ["http", "--port", "8082"]
     env:
       - name: GITHUB_PERSONAL_ACCESS_TOKEN
         valueFrom:
@@ -161,15 +149,19 @@ containers:
             name: github-mcp-secret
             key: GITHUB_PERSONAL_ACCESS_TOKEN
     ports:
-      - containerPort: 3000
+      - containerPort: 8082
 ```
 
 **LangGraph client config:**
 
 ```python
-github_client = MCPClient(
-    transport="sse",
-    url="http://github-mcp-service.gerbil.svc.cluster.local:3000/sse",
+github_client = MultiServerMCPClient(
+    {
+        "github": {
+            "url": "http://github-mcp-service.gerbil.svc.cluster.local:8082",
+            "transport": "http",
+        }
+    }
 )
 ```
 
@@ -177,47 +169,38 @@ github_client = MCPClient(
 
 ## 4. MCP Client Integration in LangGraph
 
-The LangGraph app uses the [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk) (`mcp>=1.0`) to manage client sessions.
+The LangGraph app uses [`langchain-mcp-adapters`](https://github.com/langchain-ai/langchain-mcp-adapters) (`langchain-mcp-adapters>=0.1`) to manage MCP sessions and convert MCP tools to LangChain-compatible tool objects.
 
 ### 4.1 Client lifecycle
 
 ```python
-from mcp import ClientSession
-from mcp.client.sse import sse_client
-from mcp.client.stdio import stdio_client
+from langchain_mcp_adapters.client import MultiServerMCPClient
 
-# Long-lived sessions, initialised once at pod startup:
-class MCPRegistry:
-    grafana: ClientSession       # SSE
-    smartbear: ClientSession     # stdio
-    github: ClientSession        # SSE
+# Long-lived client, initialised once at pod startup:
+client = MultiServerMCPClient(
+    {
+        "grafana": {
+            "url": "http://grafana-mcp-service.gerbil.svc.cluster.local:8000/mcp",
+            "transport": "http",
+        },
+        "smartbear": {
+            "url": "http://localhost:8081/mcp",   # via mcp-proxy sidecar
+            "transport": "http",
+        },
+        "github": {
+            "url": "http://github-mcp-service.gerbil.svc.cluster.local:8082",
+            "transport": "http",
+        },
+    }
+)
+tools = await client.get_tools()
 ```
 
-Sessions are kept alive for the pod's lifetime. Reconnection logic handles transient failures.
+> **Note:** The `"http"` transport key is for MCP Streamable HTTP (2025-03-26 spec). Use `"sse"` for legacy SSE servers. The `MultiServerMCPClient` session lifecycle is managed internally; no manual reconnection code is required.
 
 ### 4.2 Tool dispatch
 
-LangGraph tool nodes call `MCPRegistry.<server>.call_tool(name, args)`. The approval wrapper (see [`01-graph-design.md §3.2`](./01-graph-design.md)) intercepts the call before it reaches the registry.
-
-```python
-async def execute_mcp_tool(
-    state: GerbilBaseState,
-    server: str,
-    tool_name: str,
-    args: dict,
-) -> ToolResult:
-    """Approval-gated MCP tool executor."""
-    if not state["session_consent"]:
-        approval = await request_slack_approval(state, server, tool_name, args)
-        if approval.rejected:
-            return ToolResult(skipped=True)
-        if approval.approve_all:
-            state["session_consent"] = True
-
-    result = await MCP_REGISTRY[server].call_tool(tool_name, args)
-    log_approval(state, tool_name, args, decision="approved")
-    return result
-```
+LangGraph tool nodes use `ToolNode(tools)` + `tools_condition` from LangGraph prebuilt, where `tools` is the list returned by `client.get_tools()`. The approval wrapper (see [`01-graph-design.md §3.2`](./01-graph-design.md)) intercepts tool calls before the `ToolNode` executes.
 
 ### 4.3 Tool namespace mapping
 
@@ -260,8 +243,8 @@ See [`08-security.md`](./08-security.md) for rotation policy and least-privilege
 
 | Risk | Likelihood | Mitigation |
 |---|---|---|
-| SmartBear npx doesn't support SSE | High | Stdio sidecar with socket bridge; revisit when SmartBear publishes HTTP transport |
-| Grafana MCP SSE port non-standard | Medium | Verify with `docker run mcp/grafana -t sse --help` in spike |
-| GitHub MCP SSE not in official package | Low | Reference implementation supports `--transport sse`; verify version pinning |
-| Docker Hub rate limits for `mcp/grafana` image | Medium | Mirror to private registry (documented in [`07-kubernetes.md`](./07-kubernetes.md)) |
+| SmartBear npx doesn't support SSE | High | Stdio sidecar with TCP mcp-proxy bridge; revisit when SmartBear publishes HTTP transport |
+| Grafana MCP SSE port non-standard | Low | Default port is **8000** (verified). Mirror image as `grafana/mcp-grafana` to private registry |
+| GitHub MCP HTTP transport flags | ~~Medium~~ Resolved | Verified: subcommand is `http`, default port `8082`, handler mounted at `/` (PR #1849, source-verified) |
+| Docker Hub rate limits for `grafana/mcp-grafana` image | Medium | Mirror to private registry (documented in [`07-kubernetes.md`](./07-kubernetes.md)) |
 | Credential rotation breaks running sessions | Low | Sessions reconnect on 401; Health check endpoint for each MCP client |

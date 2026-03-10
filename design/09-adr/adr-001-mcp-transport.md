@@ -10,9 +10,9 @@
 
 The existing VS Code workflow connects to MCP servers over `stdio` (subprocess pipes). In Kubernetes, each MCP server must be reachable from the `gerbil-agent` Python process. Three servers are required:
 
-1. **Grafana MCP** — Docker image `mcp/grafana`
+1. **Grafana MCP** — Docker image `grafana/mcp-grafana` (port 8000)
 2. **SmartBear / Bugsnag MCP** — npx package `@smartbear/mcp`
-3. **GitHub MCP** — npx package `@modelcontextprotocol/server-github`
+3. **GitHub MCP** — Go binary `ghcr.io/github/github-mcp-server` (official server; replaces the old `@modelcontextprotocol/server-github` Node.js reference implementation)
 
 Options considered:
 
@@ -29,8 +29,8 @@ Options considered:
 **Option C: Hybrid** — HTTP/SSE for Grafana and GitHub MCP; stdio sidecar for SmartBear.
 
 Rationale:
-- Grafana MCP has a documented `-t sse` flag; no Docker-in-Docker required.
-- `@modelcontextprotocol/server-github` supports `--transport sse` in the official reference server.
+- Grafana MCP has a documented `-t sse` flag and default port 8000 (verified; image is `grafana/mcp-grafana`).
+- The official GitHub MCP server (`ghcr.io/github/github-mcp-server`, a Go binary) supports HTTP/Streamable-HTTP transport via the `http` subcommand (default port **8082**); verified from PR #1849 source code.
 - SmartBear's `@smartbear/mcp` is an npx package with no documented HTTP transport; stdio sidecar is the safe default.
 - Hybrid is more complex than all-one-way but avoids blocking the entire integration on SmartBear SSE support.
 

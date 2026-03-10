@@ -24,61 +24,61 @@ These are mutually exclusive. This ADR resolves the ambiguity.
 | A: Direct subprocess spawn | `gerbil-agent` container includes Node.js and spawns SmartBear via `MCPClient(transport="stdio", command=[...])` | Simple; proven pattern from VS Code | Pollutes Python image with Node.js runtime (~200MB); tight coupling; harder to update SmartBear independently |
 | B: Shared PID namespace | Sidecar runs SmartBear; agent attaches to sidecar process's stdin/stdout via `shareProcessNamespace: true` | Node.js isolated | Fragile; requires container PID discovery; not supported by all security policies |
 | C: Named pipe via emptyDir | Sidecar reads/writes from a FIFO pipe on a shared `emptyDir` volume; agent connects to the same pipe | Node.js isolated; no PID sharing | Custom pipe wrapper needed; error handling is complex; no existing tooling |
-| D: mcp-proxy on Unix domain socket | [mcp-proxy](https://github.com/sparfenyuk/mcp-proxy) runs inside the sidecar, wraps SmartBear's stdio transport, and exposes it as HTTP/SSE on a Unix domain socket via a shared `emptyDir` volume | Node.js isolated; agent uses same SSE client for all three servers; mcp-proxy is an established tool | Requires a custom sidecar image; adds one dependency (mcp-proxy Go binary) |
+| D: mcp-proxy on TCP localhost | [mcp-proxy](https://github.com/sparfenyuk/mcp-proxy) runs inside the sidecar, wraps SmartBear's stdio transport, and exposes it as HTTP (Streamable HTTP + SSE) on a TCP localhost port. Since all containers in a pod share the network namespace, the agent connects via `http://localhost:8081`. | Node.js isolated; agent uses same HTTP client for all three servers; mcp-proxy is an established Python tool | Requires a custom sidecar image; adds one dependency (mcp-proxy Python package) |
 
 ---
 
 ## Decision
 
-**Option D: mcp-proxy on a Unix domain socket.**
+**Option D: mcp-proxy on TCP localhost.**
 
 Architecture:
 
 ```
 gerbil-agent container                   smartbear-mcp sidecar container
 ┌─────────────────────┐                 ┌──────────────────────────────┐
-│  MCPClient           │                 │  mcp-proxy                   │
-│  (transport="sse")   │──── UDS ───────►│  (listens on unix socket)    │
-│                      │  /shared/       │         │                    │
-│                      │  smartbear.sock │         ▼                    │
+│  MultiServerMCPClient │                 │  mcp-proxy                    │
+│  (transport="http")   │── TCP :8081 ──►│  (--host 0.0.0.0 --port 8081) │
+│  url=localhost:8081   │  (shared net) │         │                    │
+│                      │               │         ▼                    │
 └─────────────────────┘                 │  SmartBear MCP (stdio)       │
                                         │  npx @smartbear/mcp@latest   │
                                         └──────────────────────────────┘
 
-Shared volume: emptyDir{} mounted at /shared in both containers
+All containers in a pod share the network namespace — no shared volumes required.
 ```
 
 ### Implementation details
 
-1. **Custom sidecar image:** `ghcr.io/topicusonderwijs/smartbear-mcp-bridge` — built from `node:22-slim` with `mcp-proxy` (Go binary, statically linked) and `@smartbear/mcp` pre-installed.
-2. **Entrypoint:** `mcp-proxy --listen unix:///shared/smartbear.sock -- npx -y @smartbear/mcp@latest`
-3. **Agent client:** `MCPClient(transport="sse", url="unix:///shared/smartbear.sock/sse")` — identical pattern to Grafana and GitHub clients.
-4. **Shared volume:** `emptyDir: {}` named `mcp-bridge-socket`, mounted at `/shared` in both the `gerbil-agent` and `smartbear-mcp` containers.
+1. **Custom sidecar image:** `ghcr.io/topicusonderwijs/smartbear-mcp-bridge` — built from `ghcr.io/sparfenyuk/mcp-proxy:latest` (a **Python package**, not a Go binary) with Node.js added via apt for `@smartbear/mcp`.
+2. **Entrypoint:** `mcp-proxy --host 0.0.0.0 --port 8081 -- npx -y @smartbear/mcp@latest`
+3. **Agent client:** Part of `MultiServerMCPClient` config: `{"url": "http://localhost:8081/mcp", "transport": "http"}` — same HTTP pattern as Grafana and GitHub clients.
+4. **No shared volumes needed:** Pod containers share the network namespace; communication is via TCP loopback.
 
 ---
 
 ## Rationale
 
-- **Uniform client code:** All three MCP servers are accessed via `MCPClient(transport="sse")`. No special-case stdio handling in the agent.
+- **Uniform client code:** All three MCP servers are accessed via `MultiServerMCPClient` with `transport="http"`. No special-case stdio handling in the agent.
 - **Runtime isolation:** Node.js stays in the sidecar; the `gerbil-agent` image is pure Python.
-- **Proven tool:** `mcp-proxy` is actively maintained and designed for exactly this stdio↔SSE bridging use case.
-- **Simple upgrade path:** If SmartBear publishes native SSE support, the sidecar can be replaced with a standalone Deployment and the Unix socket swapped for an HTTP ClusterIP Service — zero changes to graph nodes or `MCPRegistry`.
-- **No PID namespace sharing or custom pipe wrappers** — avoids fragile mechanisms that break under security policies.
+- **Proven tool:** `mcp-proxy` (Python package, `pip install mcp-proxy`) is actively maintained and designed for exactly this stdio↔HTTP bridging use case. It exposes both `/sse` and `/mcp` (Streamable HTTP) endpoints.
+- **Simple upgrade path:** If SmartBear publishes native HTTP transport, the sidecar can be replaced with a standalone Deployment and the `localhost:8081` URL swapped for an HTTP ClusterIP Service — zero changes to graph nodes.
+- **No volumes, no PID sharing:** TCP loopback is the simplest possible IPC mechanism between pod containers. No emptyDir, no socket files, no security policy concerns.
 
 ---
 
 ## Consequences
 
-- A new Docker image (`smartbear-mcp-bridge`) must be built and maintained in CI. The Dockerfile is minimal (~10 lines).
-- `mcp-proxy` becomes a dependency. It is a single Go binary with no transitive dependencies; version should be pinned.
-- The `gerbil-agent` pod gains a shared `emptyDir` volume (`mcp-bridge-socket`). This volume is ephemeral and contains only the Unix socket file.
-- Health check for SmartBear should verify the socket file exists and the SSE endpoint responds, matching the existing health check pattern in `MCPRegistry`.
+- A new Docker image (`smartbear-mcp-bridge`) must be built and maintained in CI. The Dockerfile is minimal: base `ghcr.io/sparfenyuk/mcp-proxy:latest`, add Node.js, pre-install `@smartbear/mcp`.
+- `mcp-proxy` becomes a dependency. It is a Python package (`pip install mcp-proxy`); version should be pinned in the Dockerfile.
+- No shared volumes are required. The `mcp-bridge-socket` emptyDir volume referenced in earlier design drafts is **not needed**.
+- Health check for SmartBear should verify `http://localhost:8081/health` (or the `/mcp` SSE endpoint) responds, rather than a socket file existence check.
 
 ---
 
 ## Review Trigger
 
 Revisit if:
-- SmartBear publishes native HTTP/SSE transport (eliminate the sidecar entirely).
-- `mcp-proxy` is abandoned or introduces breaking changes (evaluate alternatives: `socat`, custom Go wrapper).
-- Performance testing shows Unix domain socket overhead is significant (unlikely; UDS is zero-copy on Linux).
+- SmartBear publishes native HTTP transport (eliminate the sidecar entirely).
+- `mcp-proxy` is abandoned or introduces breaking changes (evaluate alternatives: `socat`-based proxy, custom Python wrapper).
+- Performance testing shows TCP loopback overhead is unacceptable (highly unlikely).

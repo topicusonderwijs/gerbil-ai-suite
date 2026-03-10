@@ -47,16 +47,16 @@ model = init_chat_model("openai:gpt-4.1")
 client = MultiServerMCPClient(
     {
         "grafana": {
-            "url": "http://grafana-mcp-service.gerbil.svc.cluster.local:8080/mcp",
-            "transport": "streamable_http",
+            "url": "http://grafana-mcp-service.gerbil.svc.cluster.local:8000/mcp",
+            "transport": "http",
         },
         "smartbear": {
             "url": "http://localhost:8081/mcp",  # via mcp-proxy sidecar
-            "transport": "streamable_http",
+            "transport": "http",
         },
         "github": {
-            "url": "http://github-mcp-service.gerbil.svc.cluster.local:3000/mcp",
-            "transport": "streamable_http",
+            "url": "http://github-mcp-service.gerbil.svc.cluster.local:8082",
+            "transport": "http",
         },
     }
 )
@@ -72,7 +72,7 @@ tools = await client.get_tools()
 |-----------|-----------|----------|
 | `stdio` | `command`, `args` | Local subprocess (dev) |
 | `sse` | `url`, `headers` | Legacy SSE servers |
-| `streamable_http` | `url`, `headers` | **Recommended** — new MCP standard |
+| `http` | `url`, `headers` | **Recommended** — MCP Streamable HTTP (2025-03-26 spec); `"streamable_http"` is accepted as an alias |
 | `websocket` | `url` | Real-time bidirectional (requires `pip install mcp[ws]`) |
 
 ### 1.5 Integration with LangGraph StateGraph
@@ -109,12 +109,12 @@ async def make_graph():
     client = MultiServerMCPClient({
         "grafana": {
             "url": os.getenv("GRAFANA_MCP_URL"),
-            "transport": "streamable_http",
+            "transport": "http",
             "headers": {"Authorization": f"Bearer {os.getenv('GRAFANA_TOKEN')}"}
         },
         "smartbear": {
             "url": os.getenv("SMARTBEAR_MCP_URL"),
-            "transport": "streamable_http",
+            "transport": "http",
         },
     })
     tools = await client.get_tools()
@@ -223,11 +223,11 @@ The spec defines a **fallback protocol** for clients that need to support both o
 
 The current design doc (`02-mcp-integration.md`) specifies `SSE` throughout. This needs updating:
 
-- **Grafana MCP**: Check if Docker image supports `-t streamable-http` (likely yes with recent versions)
+- **Grafana MCP**: Check if Docker image supports `-t streamable-http` (likely yes with recent versions; default port is **8000**)
 - **SmartBear/Bugsnag MCP**: mcp-proxy now exposes both `/sse` AND `/mcp` endpoints automatically
-- **GitHub MCP**: Check if `@modelcontextprotocol/server-github` supports Streamable HTTP
+- **GitHub MCP**: Official server is `ghcr.io/github/github-mcp-server` (Go binary). Streamable HTTP mode was added in a recent release; verify exact transport flags before implementation.
 
-**Recommendation:** Use `streamable_http` as the default transport in `MultiServerMCPClient`, with SSE as fallback. The adapter handles both transparently.
+**Recommendation:** Use `"http"` as the transport key in `MultiServerMCPClient` (the documented canonical key for Streamable HTTP). `"streamable_http"` is accepted as an alias but the README was updated to prefer `"http"`. The adapter handles both SSE and Streamable HTTP transparently.
 
 ### 2.6 Security Considerations (New in Streamable HTTP)
 
@@ -705,10 +705,10 @@ gerbil-agent/
 | Section | Current | Should Be |
 |---------|---------|-----------|
 | §2 Transport Matrix | SSE everywhere | Streamable HTTP (with SSE fallback) |
-| §3.1 Grafana client | `MCPClient(transport="sse", url="...8080/sse")` | `MultiServerMCPClient({"grafana": {"url": "...8080/mcp", "transport": "streamable_http"}})` |
+| §3.1 Grafana client | `MCPClient(transport="sse", url="...8080/sse")` | `MultiServerMCPClient({"grafana": {"url": "...8000/mcp", "transport": "http"}})` |
 | §3.2 SmartBear sidecar | Unix socket + `mcp-proxy --listen unix://` | TCP HTTP + `mcp-proxy --host 0.0.0.0 --port 8081` |
-| §3.2 SmartBear client | `MCPClient(transport="sse", url="unix:///shared/smartbear.sock/sse")` | Part of `MultiServerMCPClient` config |
-| §3.3 GitHub client | `MCPClient(transport="sse", url="...3000/sse")` | Part of `MultiServerMCPClient` config |
+| §3.2 SmartBear client | `MCPClient(transport="sse", url="unix:///shared/smartbear.sock/sse")` | Part of `MultiServerMCPClient` config with `transport="http"` |
+| §3.3 GitHub client | `MCPClient(transport="sse", url="...3000/sse")` + old npm package | `ghcr.io/github/github-mcp-server` (Go binary); HTTP mode flags to verify |
 | §4 Client Integration | Custom `MCPRegistry` class | `MultiServerMCPClient` from `langchain-mcp-adapters` |
 | §4.1 Client lifecycle | Manual `ClientSession` management | Managed by `MultiServerMCPClient` |
 | §4.2 Tool dispatch | Custom `execute_mcp_tool()` wrapper | `ToolNode(tools)` + `tools_condition` (LangGraph prebuilt) |

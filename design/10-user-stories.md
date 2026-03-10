@@ -115,62 +115,62 @@ Epic 9: Hardening           ← health checks, scaling, security audit
 
 ---
 
-### US-2.0 — Spike: verify MCP SSE transport (Sprint 0 prerequisite)
+### US-2.0 — Spike: verify MCP HTTP transport
 
 **As a developer**  
-**I want** to verify before implementation that both Grafana and GitHub MCP servers support the expected SSE port and flags  
+**I want** to verify before implementation that both Grafana and GitHub MCP servers support the expected HTTP transport flags  
 **So that** [`ADR-001`](./09-adr/adr-001-mcp-transport.md) assumptions are validated before the team invests in the remaining Epic 2 stories
 
 **Acceptance criteria:**
-- [ ] Spike result document created confirming or correcting the SSE port/flags for `mcp/grafana`
-- [ ] Spike result document confirming or correcting `--transport sse` for `@modelcontextprotocol/server-github`
-- [ ] If either server does not support SSE, ADR-001 is updated and the affected server implementation plan revised
-- [ ] Spike completed before Epic 2 stories US-2.1–US-2.4 are pulled into a sprint
+- [x] Spike result: Grafana MCP image is `grafana/mcp-grafana` (not `mcp/grafana`); default port is **8000** (not 8080); transport flag `-t sse` confirmed (✅ done)
+- [x] Spike result: GitHub MCP server is `ghcr.io/github/github-mcp-server` (Go binary); `@modelcontextprotocol/server-github` npm package is superseded (✅ done)
+- [x] Spike result: GitHub MCP HTTP transport uses subcommand `http --port 8082` (not a `--transport` flag); handler mounted at `/`; verified from PR #1849 source code (✅ done)
+- [ ] If either server does not support HTTP transport, ADR-001 is updated and the affected server implementation plan revised
 
 **Technical tasks:**
-- `docker run mcp/grafana --help` and `docker run mcp/grafana -t sse` in a local environment
-- `npx @modelcontextprotocol/server-github --help` in a local environment
+- `docker run grafana/mcp-grafana --help` and `docker run -p 8000:8000 grafana/mcp-grafana -t sse` in a local environment
+- `docker run ghcr.io/github/github-mcp-server --help` to verify Streamable HTTP flags
 - Document results; update ADR-001 if needed
 
-> **Sprint 0 blocker:** This story must be completed before US-2.1 and US-2.2 begin.
+> **Sprint 0 blocker:** GitHub MCP HTTP transport flag verification must be completed before US-2.2 begins.
 
 ---
 
 ### US-2.1 — Grafana MCP service (HTTP/SSE)
 
 **As** the LangGraph orchestrator  
-**I want** a running Grafana MCP server accessible at `http://grafana-mcp-svc:8080/sse`  
+**I want** a running Grafana MCP server accessible at `http://grafana-mcp-svc:8000/sse`  
 **So that** graph nodes can query Grafana metrics and dashboards
 
 **Acceptance criteria:**
-- [ ] `grafana-mcp` Deployment running with `mcp/grafana` image and `-t sse` flag
-- [ ] ClusterIP Service `grafana-mcp-svc` exposes port 8080
-- [ ] Python `MCPClient(transport="sse", url=...)` can list available tools successfully
+- [ ] `grafana-mcp` Deployment running with `grafana/mcp-grafana` image and `-t sse` flag
+- [ ] ClusterIP Service `grafana-mcp-svc` exposes port **8000**
+- [ ] `MultiServerMCPClient` with `transport="http"` can list available tools successfully
 - [ ] `grafana/query` and `grafana/get_dashboard_by_uid` tool calls return data for a known dashboard (e.g. `K3Q86qtGz`)
 - [ ] Credentials loaded via `grafana-mcp-secret`; not visible in pod env listing outside the namespace
 
 **Technical tasks:**
 - Write Deployment and Service manifests (see [`07-kubernetes.md §4.2`](./07-kubernetes.md))
-- Verify SSE port with `docker run mcp/grafana -t sse --help` in spike
+- Port **8000** is the default; confirmed via `docker run -p 8000:8000 grafana/mcp-grafana -t sse`
 - Write integration test: list tools + one test query against `PBFA97CFB590B2093` datasource
 
 ---
 
-### US-2.2 — GitHub MCP service (HTTP/SSE)
+### US-2.2 — GitHub MCP service (HTTP/Streamable-HTTP)
 
 **As** the LangGraph orchestrator  
-**I want** a running GitHub MCP server accessible at `http://github-mcp-svc:3000/sse`  
+**I want** a running GitHub MCP server accessible at `http://github-mcp-svc:8082`  
 **So that** graph nodes can query releases, commits, and code from `topicusonderwijs/iridium`
 
 **Acceptance criteria:**
-- [ ] `github-mcp` Deployment running with `@modelcontextprotocol/server-github` and `--transport sse`
-- [ ] ClusterIP Service `github-mcp-svc` exposes port 3000
+- [ ] `github-mcp` Deployment running with `ghcr.io/github/github-mcp-server` (official Go binary)
+- [ ] ClusterIP Service `github-mcp-svc` exposes port **8082**
 - [ ] `github/list_releases` call returns at least the last 3 releases from `topicusonderwijs/iridium`
 - [ ] Fine-grained PAT scoped to `topicusonderwijs/iridium` + `topicusonderwijs/somtoday-docs` (read-only)
 
 **Technical tasks:**
+- Verify Streamable HTTP transport flags with `docker run ghcr.io/github/github-mcp-server --help` (see US-2.0)
 - Write Deployment and Service manifests (see [`07-kubernetes.md §4.3`](./07-kubernetes.md))
-- Verify `--transport sse` flag availability in a spike
 - Write integration test
 
 ---
@@ -182,36 +182,36 @@ Epic 9: Hardening           ← health checks, scaling, security audit
 **So that** graph nodes can query Bugsnag error rates and stability scores
 
 **Acceptance criteria:**
-- [ ] `smartbear-mcp` sidecar container running `mcp-proxy` wrapping `@smartbear/mcp@latest` in `gerbil-agent` pod
-- [ ] `mcp-proxy` exposes SmartBear's stdio interface as SSE on a Unix domain socket (`/shared/smartbear.sock`)
-- [ ] Python `MCPClient(transport="sse", url="unix:///shared/smartbear.sock/sse")` can list available tools
+- [ ] `smartbear-mcp` sidecar container running `mcp-proxy --host 0.0.0.0 --port 8081` wrapping `@smartbear/mcp@latest` in `gerbil-agent` pod
+- [ ] `MultiServerMCPClient` with `transport="http", url="http://localhost:8081/mcp"` can list available tools
 - [ ] `smartbear/list_errors` with filter `app.release_stage = "production"` returns errors for project `543ce4797765623fb900011d`
 - [ ] Bugsnag auth token loaded via `smartbear-mcp-secret`
 - [ ] Custom bridge image (`smartbear-mcp-bridge`) built and published to `ghcr.io/topicusonderwijs/`
+- [ ] No shared `emptyDir` volumes needed (TCP loopback via shared pod network namespace)
 
 **Technical tasks:**
-- Build `smartbear-mcp-bridge` Docker image (node:22-slim + mcp-proxy + @smartbear/mcp)
-- Add sidecar container spec to `gerbil-agent` Deployment with shared `emptyDir` volume
+- Build `smartbear-mcp-bridge` Docker image based on `ghcr.io/sparfenyuk/mcp-proxy:latest` + Node.js + `@smartbear/mcp`
+- Add sidecar container spec to `gerbil-agent` Deployment (no shared volumes required)
 - Write integration test covering both `"production"` and `"productie"` release stage filter variants
 - See [`ADR-005`](./09-adr/adr-005-smartbear-stdio-bridge.md) for bridge design rationale
 
 ---
 
-### US-2.4 — MCP Registry and tool dispatch
+### US-2.4 — MCP client and tool dispatch
 
 **As** a LangGraph graph node  
-**I want** a unified `MCPRegistry` that provides named access to all three MCP clients  
-**So that** nodes can call `REGISTRY["grafana"].call_tool(...)` without knowing transport details
+**I want** a unified `MultiServerMCPClient` that provides access to all three MCP servers  
+**So that** nodes can call tools via `ToolNode(tools)` without knowing transport details
 
 **Acceptance criteria:**
-- [ ] `MCPRegistry` initialises all three sessions at application startup
-- [ ] Health check endpoint reports per-client connection status
+- [ ] `MultiServerMCPClient` initialises all three server connections at application startup
+- [ ] Health check endpoint reports per-server connection status
 - [ ] Reconnect logic handles transient disconnections (max 5 attempts, exponential backoff)
-- [ ] `execute_mcp_tool()` wrapper enforces approval gate before every call (see [`01-graph-design.md §3.2`](./01-graph-design.md))
+- [ ] Approval gate interceptor enforces consent before every tool call (see [`01-graph-design.md §3.2`](./01-graph-design.md))
 
 **Technical tasks:**
-- Implement `mcp_registry.py`
-- Implement `execute_mcp_tool()` approval wrapper
+- Implement `mcp/client.py` using `MultiServerMCPClient` from `langchain-mcp-adapters`
+- Implement approval gate as a tool interceptor
 - Add `/health` endpoint with MCP status to the FastAPI/Starlette health server
 
 ---

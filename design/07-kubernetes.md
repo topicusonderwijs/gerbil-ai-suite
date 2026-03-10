@@ -49,7 +49,7 @@ Internet (Slack Events API)
 │     │      │                      │                             │
 │     ▼      ▼                      ▼                             │
 │  grafana-mcp-svc          github-mcp-svc          postgres-svc  │
-│  (ClusterIP :8080)        (ClusterIP :3000)        (:5432)      │
+│  (ClusterIP :8000)        (ClusterIP :3000)        (:5432)      │
 │     │                         │                                  │
 │     ▼                         ▼                                  │
 │  grafana-mcp Pod          github-mcp Pod                        │
@@ -121,9 +121,9 @@ spec:
         - name: POSTGRES_URL
           valueFrom: { secretKeyRef: { name: postgres-secret, key: POSTGRES_URL } }
         - name: GRAFANA_MCP_URL
-          value: "http://grafana-mcp-svc.gerbil.svc.cluster.local:8080/sse"
+          value: "http://grafana-mcp-svc.gerbil.svc.cluster.local:8000/sse"
         - name: GITHUB_MCP_URL
-          value: "http://github-mcp-svc.gerbil.svc.cluster.local:3000/sse"
+          value: "http://github-mcp-svc.gerbil.svc.cluster.local:8082"
         - name: BUGSNAG_AUTH_TOKEN
           valueFrom: { secretKeyRef: { name: smartbear-mcp-secret, key: BUGSNAG_AUTH_TOKEN } }
         - name: LLM_PROVIDER
@@ -161,8 +161,10 @@ spec:
       image: ghcr.io/topicusonderwijs/smartbear-mcp-bridge:latest
       command:
         - mcp-proxy
-        - --listen
-        - unix:///shared/smartbear.sock
+        - --host
+        - "0.0.0.0"
+        - --port
+        - "8081"
         - --
         - npx
         - "-y"
@@ -170,9 +172,6 @@ spec:
       env:
         - name: BUGSNAG_AUTH_TOKEN
           valueFrom: { secretKeyRef: { name: smartbear-mcp-secret, key: BUGSNAG_AUTH_TOKEN } }
-      volumeMounts:
-        - name: mcp-bridge-socket
-          mountPath: /shared
       resources:
         requests:
           cpu: "100m"
@@ -185,8 +184,6 @@ spec:
     - name: rapports-volume
       persistentVolumeClaim:
         claimName: rapports-pvc
-    - name: mcp-bridge-socket
-      emptyDir: {}
     - name: deploy-key
       secret:
         secretName: gitpush-secret
@@ -201,10 +198,10 @@ spec:
 ```yaml
 containers:
   - name: grafana-mcp
-    image: mcp/grafana:latest
+    image: grafana/mcp-grafana:latest
     args: ["-t", "sse"]
     ports:
-      - containerPort: 8080
+      - containerPort: 8000
     env:
       - name: GRAFANA_URL
         valueFrom: { secretKeyRef: { name: grafana-mcp-secret, key: GRAFANA_URL } }
@@ -217,14 +214,15 @@ containers:
 
 ### 4.3 `github-mcp` Pod
 
+> ✅ **Verified (2025):** The official GitHub MCP server is a Go binary at `ghcr.io/github/github-mcp-server`. HTTP/Streamable-HTTP mode was added in PR #1849 via the `http` subcommand. Default port is **8082**. The server mounts the MCP handler at `/` (root path) using `mcp.NewStreamableHTTPHandler`.
+
 ```yaml
 containers:
   - name: github-mcp
-    image: node:22-slim
-    command: ["npx", "-y", "@modelcontextprotocol/server-github@latest"]
-    args: ["--transport", "sse", "--port", "3000"]
+    image: ghcr.io/github/github-mcp-server:latest
+    args: ["http", "--port", "8082"]
     ports:
-      - containerPort: 3000
+      - containerPort: 8082
     env:
       - name: GITHUB_PERSONAL_ACCESS_TOKEN
         valueFrom: { secretKeyRef: { name: github-mcp-secret, key: GITHUB_PERSONAL_ACCESS_TOKEN } }
@@ -379,7 +377,7 @@ metadata:
   namespace: gerbil
 spec:
   selector: { app: grafana-mcp }
-  ports: [{ port: 8080, targetPort: 8080 }]
+  ports: [{ port: 8000, targetPort: 8000 }]
   type: ClusterIP
 
 # github-mcp-svc
@@ -390,7 +388,7 @@ metadata:
   namespace: gerbil
 spec:
   selector: { app: github-mcp }
-  ports: [{ port: 3000, targetPort: 3000 }]
+  ports: [{ port: 8082, targetPort: 8082 }]
   type: ClusterIP
 
 # postgres-svc
@@ -446,8 +444,8 @@ Scale-out strategy (post-MVP):
 | Image | Registry | Notes |
 |---|---|---|
 | `gerbil-agent` | `ghcr.io/topicusonderwijs/gerbil-agent` | Built in CI; versioned tags |
-| `mcp/grafana` | Private mirror of Docker Hub `mcp/grafana` | Mirror to avoid rate limits |
-| `node:22-slim` | Docker Hub (or private mirror) | Used for SmartBear + GitHub MCP |
+| `grafana/mcp-grafana` | Docker Hub (or private mirror) | Mirror to avoid rate limits; port 8000 |
+| `ghcr.io/github/github-mcp-server` | GitHub Container Registry | Official Go binary; replaces old `node:22-slim` + npx approach |
 | `postgres:16-alpine` | Docker Hub (or private mirror) | |
 | `alpine/git:latest` | Docker Hub (or private mirror) | Init container |
 

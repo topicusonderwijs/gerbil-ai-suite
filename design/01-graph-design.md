@@ -73,7 +73,7 @@ The two research workflows share the same graph skeleton — only the phase node
 [setup_run]                     ← create rapports/DIR/research/, initialise state
      │
      ▼
-[verify_deployment_timeline]    ← MANDATORY: ask user for exact deploy time, rollbacks, platform
+[verify_deployment_timeline]    ← MANDATORY for both UC-1 and UC-2: ask user for exact deploy time, rollbacks, platform
      │  (Slack prompt → wait for confirmation)
      ▼
 [phase_node_1]  ──[tool_call_approved?]──► execute ──► write_research_file
@@ -149,6 +149,7 @@ Derived from [`incident_analysis.agent.md`](../.github/agents/incident_analysis.
 |---|---|---|---|
 | `parse_incident` | Phase 0 | — (Slack only) | header of all files |
 | `verify_deployment_timeline` | Phase 0b | — (Slack only) | header of all files |
+| `gather_github_context` | Phase 1 | `github/commits`, `github/compare` | — |
 | `research_database` | Phase 2 | `grafana/query` (PgBouncer + Postgres dashboards) | `research/database.md` |
 | `research_kubernetes` | Phase 3 | `grafana/query`, `grafana/dashboard` | `research/kubernetes.md` |
 | `research_cloudflare` | Phase 4 | `grafana/query` (dashboard `2WhbDNm7z`) | `research/cloudflare.md` |
@@ -156,6 +157,8 @@ Derived from [`incident_analysis.agent.md`](../.github/agents/incident_analysis.
 | `research_application` | Phase 6 | `grafana/query` (Wildfly + Traefik) | `research/application.md` |
 | `research_exceptions` | Phase 7 | `smartbear/errors`, `github/commits` | `research/exceptions.md` |
 | `synthesise` | Phase 8 | — | `summary.md` |
+
+> **Note:** Phase 1 (`gather_github_context`) is included in the incident workflow to identify recent deployments and code changes that may correlate with the incident timeline. This is essential for hypothesis validation in Phase 8.
 
 ---
 
@@ -217,24 +220,29 @@ Short-lived. Backed by the retrieval subsystem (see [`06-docs-qa-subsystem.md`](
 [END]
 ```
 
-No MCP tool calls are made; the retrieval subsystem handles corpus access internally. No approval gate needed (read-only, no external API calls visible to the user).
+No MCP tool calls are made; the retrieval subsystem handles corpus access internally. No approval gate is needed for MCP calls since there are none.
+
+> **Note on LLM calls:** The embedding query and answer synthesis steps do invoke the LLM provider (external API call), but these are exempt from the per-call approval model because they are (a) inherent to every LangGraph node and cannot be individually gated, (b) read-only with respect to external systems, and (c) covered by the initial plan approval. This is consistent with UC-3 (Code Q&A), where LLM synthesis calls are also not individually approved.
 
 ---
 
 ## 6. State Schema
 
-All graphs operate on a shared base state, extended per use case.
+All graphs operate on a shared base state, extended per use case. The **canonical state schema** is defined in [`04-state-and-memory.md`](./04-state-and-memory.md). A summary is shown here for convenience; in case of discrepancy, `04-state-and-memory.md` is authoritative.
 
 ```python
 class GerbilBaseState(TypedDict):
     # Identity
     slack_thread_ts: str          # Slack thread timestamp (run scope key)
     slack_channel: str
+    slack_team_id: str
     run_id: str                   # LangGraph run ID
     user_id: str                  # Slack user who triggered
+    created_at: str               # ISO8601 UTC
 
     # Intent
     intent: str                   # RELEASE | INCIDENT | CODE_QA | DOCS_QA
+    raw_request: str              # Original user text
     entities: dict                # extracted: version, time_window, component, ...
 
     # Approval
@@ -244,6 +252,7 @@ class GerbilBaseState(TypedDict):
     # Progress
     current_phase: str
     completed_phases: list[str]
+    data_gaps: list[str]          # Phases/tools that returned no data
     research_files: dict          # {filename: path_on_pvc}
 
     # Output

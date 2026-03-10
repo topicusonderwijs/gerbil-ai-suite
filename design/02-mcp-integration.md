@@ -73,40 +73,70 @@ grafana_client = MCPClient(
 
 ---
 
-### 3.2 SmartBear / Bugsnag MCP (stdio sidecar)
+### 3.2 SmartBear / Bugsnag MCP (stdio sidecar via mcp-proxy)
 
 **Package:** `@smartbear/mcp@latest` (npx, Node.js)  
-**Transport:** stdio pipe between `gerbil-agent` main container and sidecar  
-**Bridge mechanism:** Unix domain socket or named pipe via shared `emptyDir` volume, managed by [mcp-proxy](https://github.com/sparfenyuk/mcp-proxy) or a thin wrapper script.
+**Transport:** stdio inside the sidecar, exposed as HTTP/SSE to the agent via [mcp-proxy](https://github.com/sparfenyuk/mcp-proxy)  
+**Bridge mechanism:** `mcp-proxy` runs as a second process inside the sidecar container. It spawns the SmartBear MCP process over stdio and exposes it as an SSE endpoint on a Unix domain socket. The `gerbil-agent` connects to this socket, making the integration identical to the SSE pattern used for Grafana and GitHub.
+
+This approach was chosen over the alternatives (direct subprocess spawn, shared PID namespace) because it:
+- Keeps the Node.js runtime fully isolated in the sidecar — `gerbil-agent` requires only Python.
+- Reuses the same `MCPClient(transport="sse")` code path for all three servers.
+- Avoids sharing PID namespaces or raw file descriptors across containers.
+
+See [`ADR-005`](./09-adr/adr-005-smartbear-stdio-bridge.md) for the full decision record.
 
 **Sidecar container sketch:**
 
 ```yaml
 containers:
   - name: smartbear-mcp
-    image: node:22-slim
-    command: ["npx", "-y", "@smartbear/mcp@latest"]
+    image: ghcr.io/topicusonderwijs/smartbear-mcp-bridge:latest
+    # Custom image: node:22-slim + mcp-proxy + @smartbear/mcp
+    # Entrypoint: mcp-proxy wraps SmartBear stdio and exposes SSE
+    command:
+      - mcp-proxy
+      - --listen
+      - unix:///shared/smartbear.sock
+      - --
+      - npx
+      - "-y"
+      - "@smartbear/mcp@latest"
     env:
       - name: BUGSNAG_AUTH_TOKEN
         valueFrom:
           secretKeyRef:
             name: smartbear-mcp-secret
             key: BUGSNAG_AUTH_TOKEN
-    stdin: true
-    tty: false
+    volumeMounts:
+      - name: mcp-bridge-socket
+        mountPath: /shared
 ```
 
-**stdin/stdout bridge:** The `gerbil-agent` container communicates with the sidecar over the MCP Python SDK's subprocess transport, using the sidecar's PID namespace via:
+The `gerbil-agent` container mounts the same `emptyDir` volume:
+
+```yaml
+    - name: gerbil-agent
+      # ... (other config)
+      volumeMounts:
+        - name: mcp-bridge-socket
+          mountPath: /shared
+
+volumes:
+  - name: mcp-bridge-socket
+    emptyDir: {}
+```
+
+**LangGraph client config:**
 
 ```python
 smartbear_client = MCPClient(
-    transport="stdio",
-    command=["npx", "-y", "@smartbear/mcp@latest"],
-    env={"BUGSNAG_AUTH_TOKEN": os.environ["BUGSNAG_AUTH_TOKEN"]},
+    transport="sse",
+    url="unix:///shared/smartbear.sock/sse",
 )
 ```
 
-> **Note:** This means the `gerbil-agent` must have `npx` / Node.js available, OR it communicates via a stdin/stdout socket bridge to the sidecar. The preferred approach is to run SmartBear MCP as a sidecar with a socket bridge so the Node.js runtime is isolated. A concrete bridge implementation decision is deferred to the implementation sprint (see ADR-001).
+> **Note:** The custom bridge image (`smartbear-mcp-bridge`) is built in CI from a simple Dockerfile that installs `mcp-proxy` (Go binary) and `@smartbear/mcp` (npm). If SmartBear publishes native SSE support in a future release, the sidecar can be replaced with a standalone Deployment and the Unix socket bridge removed — no changes to graph nodes required.
 
 ---
 

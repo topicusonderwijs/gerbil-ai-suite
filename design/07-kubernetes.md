@@ -20,7 +20,7 @@ All components run in the **`gerbil` namespace** in the production Kubernetes cl
 | `grafana-mcp` | Deployment | 1 | Grafana MCP server (HTTP/SSE) |
 | `github-mcp` | Deployment | 1 | GitHub MCP server (HTTP/SSE) |
 | `gerbil-postgres` | StatefulSet | 1 | PostgreSQL 16 (checkpoints + vector store) |
-| `docs-ingestion` | CronJob | — | Nightly docs re-indexing (00:00 CET) |
+| `docs-ingestion` | CronJob | — | Nightly docs re-indexing (02:00 CET) |
 | `git-init` | InitContainer | — | Clone git repo into PVC at pod startup |
 | `rapports-pvc` | PersistentVolumeClaim | — | 5 GiB ReadWriteOnce |
 | `postgres-pvc` | PersistentVolumeClaim | — | 10 GiB ReadWriteOnce |
@@ -79,11 +79,20 @@ spec:
         - sh
         - -c
         - |
+          # Set up SSH deploy key for Git operations
+          mkdir -p /root/.ssh
+          cp /secrets/deploy-key /root/.ssh/id_ed25519
+          chmod 600 /root/.ssh/id_ed25519
+          export GIT_SSH_COMMAND="ssh -i /root/.ssh/id_ed25519 -o StrictHostKeyChecking=no"
           if [ ! -d /rapports/.git ]; then
             git clone $GIT_REPO_URL /rapports
           else
             git -C /rapports pull --rebase
           fi
+          # Persist SSH config for main container's push operations
+          cp /root/.ssh/id_ed25519 /rapports/.git/deploy-key
+          git -C /rapports config core.sshCommand \
+            "ssh -i $(pwd)/.git/deploy-key -o StrictHostKeyChecking=no"
       env:
         - name: GIT_REPO_URL
           valueFrom:
@@ -93,6 +102,9 @@ spec:
       volumeMounts:
         - name: rapports-volume
           mountPath: /rapports
+        - name: deploy-key
+          mountPath: /secrets
+          readOnly: true
 
   containers:
     - name: gerbil-agent
@@ -146,12 +158,21 @@ spec:
         periodSeconds: 30
 
     - name: smartbear-mcp
-      image: node:22-slim
-      command: ["npx", "-y", "@smartbear/mcp@latest"]
+      image: ghcr.io/topicusonderwijs/smartbear-mcp-bridge:latest
+      command:
+        - mcp-proxy
+        - --listen
+        - unix:///shared/smartbear.sock
+        - --
+        - npx
+        - "-y"
+        - "@smartbear/mcp@latest"
       env:
         - name: BUGSNAG_AUTH_TOKEN
           valueFrom: { secretKeyRef: { name: smartbear-mcp-secret, key: BUGSNAG_AUTH_TOKEN } }
-      stdin: true
+      volumeMounts:
+        - name: mcp-bridge-socket
+          mountPath: /shared
       resources:
         requests:
           cpu: "100m"
@@ -164,6 +185,15 @@ spec:
     - name: rapports-volume
       persistentVolumeClaim:
         claimName: rapports-pvc
+    - name: mcp-bridge-socket
+      emptyDir: {}
+    - name: deploy-key
+      secret:
+        secretName: gitpush-secret
+        items:
+          - key: GIT_DEPLOY_KEY
+            path: deploy-key
+            mode: 0400
 ```
 
 ### 4.2 `grafana-mcp` Pod
@@ -202,6 +232,139 @@ containers:
       requests: { cpu: "100m", memory: "256Mi" }
       limits: { cpu: "500m", memory: "512Mi" }
 ```
+
+### 4.4 `gerbil-postgres` StatefulSet
+
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: gerbil-postgres
+  namespace: gerbil
+spec:
+  serviceName: postgres-svc
+  replicas: 1
+  selector:
+    matchLabels: { app: gerbil-postgres }
+  template:
+    metadata:
+      labels: { app: gerbil-postgres }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999     # postgres user
+        fsGroup: 999
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: "gerbil"
+            - name: POSTGRES_USER
+              valueFrom: { secretKeyRef: { name: postgres-secret, key: POSTGRES_USER } }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: postgres-secret, key: POSTGRES_PASSWORD } }
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+            - name: init-sql
+              mountPath: /docker-entrypoint-initdb.d
+          resources:
+            requests: { cpu: "250m", memory: "512Mi" }
+            limits: { cpu: "1000m", memory: "2Gi" }
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "gerbil"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "gerbil"]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: init-sql
+          configMap:
+            name: postgres-init-sql
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests: { storage: 10Gi }
+```
+
+**Init SQL ConfigMap** (applied on first database creation):
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-sql
+  namespace: gerbil
+data:
+  01-extensions.sql: |
+    CREATE EXTENSION IF NOT EXISTS vector;
+  02-gerbil-runs.sql: |
+    CREATE TABLE IF NOT EXISTS gerbil_runs (
+        run_id          UUID PRIMARY KEY,
+        slack_thread_ts TEXT NOT NULL,
+        slack_channel   TEXT NOT NULL,
+        slack_team_id   TEXT NOT NULL,
+        user_id         TEXT NOT NULL,
+        intent          TEXT NOT NULL,
+        status          TEXT NOT NULL,
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+        completed_at    TIMESTAMPTZ,
+        artifact_dir    TEXT,
+        git_commit_sha  TEXT
+    );
+```
+
+**Backup CronJob:**
+
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: gerbil
+spec:
+  schedule: "0 3 * * *"   # 03:00 UTC daily
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: pg-backup
+              image: postgres:16-alpine
+              command:
+                - sh
+                - -c
+                - |
+                  pg_dump -Fc -h postgres-svc -U $POSTGRES_USER -d gerbil \
+                    > /backups/gerbil_$(date +%Y%m%d_%H%M%S).dump
+                  # Retain last 14 backups
+                  ls -t /backups/gerbil_*.dump | tail -n +15 | xargs -r rm
+              env:
+                - name: POSTGRES_USER
+                  valueFrom: { secretKeyRef: { name: postgres-secret, key: POSTGRES_USER } }
+                - name: PGPASSWORD
+                  valueFrom: { secretKeyRef: { name: postgres-secret, key: POSTGRES_PASSWORD } }
+              volumeMounts:
+                - name: backup-volume
+                  mountPath: /backups
+          restartPolicy: OnFailure
+          volumes:
+            - name: backup-volume
+              persistentVolumeClaim:
+                claimName: postgres-backup-pvc
+```
+
+> **Note on memory limits:** The 2Gi memory limit for Postgres is adequate for the MVP checkpoint and run-index workload. If the docs Q&A vector store grows significantly (pgvector IVFFlat indexing is memory-intensive), this limit should be revisited and potentially raised to 4Gi.
 
 ---
 
@@ -274,6 +437,7 @@ Scale-out strategy (post-MVP):
 - The bottleneck is the SmartBear MCP sidecar (stdio, one pod = one connection). To scale, migrate SmartBear to HTTP/SSE so the sidecar constraint is removed.
 - `gerbil-agent` can then scale to N replicas with shared Postgres checkpointer.
 - `grafana-mcp` and `github-mcp` can scale independently via HPA on CPU.
+- **PVC constraint:** `rapports-pvc` is ReadWriteOnce, preventing multiple agent replicas from writing concurrently. Scale-out requires switching to ReadWriteMany (if the storage class supports it) or migrating to a direct GitHub API file-write strategy that bypasses the local PVC.
 
 ---
 

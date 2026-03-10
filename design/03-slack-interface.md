@@ -107,6 +107,12 @@ When the operator clicks **"Approve all remaining"** at any tool-call approval s
 
 Consent can be revoked with `@gerbil pause` at any time.
 
+### 4.3 Approval authorisation
+
+Approval actions (button clicks) are restricted to the **run initiator** or members of the **Ops team** (defined by a configurable Slack user group ID in the app config). If a user outside this set clicks an approval button, the bot responds ephemerally: _"Only the run initiator or Ops team members can approve actions for this run."_
+
+This prevents accidental or unauthorized approval in shared channels where multiple concurrent runs may be visible.
+
 ### 4.3 Approval message format
 
 ```

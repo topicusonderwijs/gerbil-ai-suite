@@ -207,6 +207,8 @@ LangGraph accumulates `messages` in state. For long-running research workflows (
 2. **Hard cap:** Maximum 50 messages in `messages`; oldest messages are summarised and compacted when the cap is reached.
 3. **Research files as the source of truth:** The `messages` list is for LLM context window; the research files are the durable record.
 
+> **Critical constraint for the `synthesise` node:** The synthesis phase MUST read research files directly from the PVC filesystem (`artifact_dir/research/*.md`), not from the `messages` list. This is because message compaction may have removed the detailed tool call results by the time synthesis runs. The `messages` list provides conversational context only; the research files contain the complete data.
+
 ---
 
 ## 9. Audit Log Requirements

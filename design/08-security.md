@@ -170,6 +170,8 @@ spec:
         - port: 443
 ```
 
+> **Note on egress scope:** The `to: []` rule allows egress to any external IP on port 443. For a tighter posture, consider restricting to known external endpoints via CIDR blocks (if IPs are static) or FQDN-based egress policies (if the CNI supports it, e.g. Cilium `CiliumNetworkPolicy` with `toFQDNs`). Known required external hosts: Grafana instance URL, `api.github.com`, `api.bugsnag.com`, Slack API (`*.slack.com`, `wss-primary.slack.com`), and the LLM provider endpoint. This refinement is recommended as a post-MVP hardening step.
+
 MCP service pods only allow ingress from `gerbil-agent`:
 
 ```yaml

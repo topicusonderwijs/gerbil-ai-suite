@@ -115,6 +115,27 @@ Epic 9: Hardening           ← health checks, scaling, security audit
 
 ---
 
+### US-2.0 — Spike: verify MCP SSE transport (Sprint 0 prerequisite)
+
+**As a developer**  
+**I want** to verify before implementation that both Grafana and GitHub MCP servers support the expected SSE port and flags  
+**So that** [`ADR-001`](./09-adr/adr-001-mcp-transport.md) assumptions are validated before the team invests in the remaining Epic 2 stories
+
+**Acceptance criteria:**
+- [ ] Spike result document created confirming or correcting the SSE port/flags for `mcp/grafana`
+- [ ] Spike result document confirming or correcting `--transport sse` for `@modelcontextprotocol/server-github`
+- [ ] If either server does not support SSE, ADR-001 is updated and the affected server implementation plan revised
+- [ ] Spike completed before Epic 2 stories US-2.1–US-2.4 are pulled into a sprint
+
+**Technical tasks:**
+- `docker run mcp/grafana --help` and `docker run mcp/grafana -t sse` in a local environment
+- `npx @modelcontextprotocol/server-github --help` in a local environment
+- Document results; update ADR-001 if needed
+
+> **Sprint 0 blocker:** This story must be completed before US-2.1 and US-2.2 begin.
+
+---
+
 ### US-2.1 — Grafana MCP service (HTTP/SSE)
 
 **As** the LangGraph orchestrator  
@@ -154,22 +175,25 @@ Epic 9: Hardening           ← health checks, scaling, security audit
 
 ---
 
-### US-2.3 — SmartBear MCP sidecar (stdio)
+### US-2.3 — SmartBear MCP sidecar (mcp-proxy bridge)
 
 **As** the LangGraph orchestrator  
 **I want** the SmartBear Bugsnag MCP server available as a sidecar in the `gerbil-agent` pod  
 **So that** graph nodes can query Bugsnag error rates and stability scores
 
 **Acceptance criteria:**
-- [ ] `smartbear-mcp` sidecar container running `npx -y @smartbear/mcp@latest` in `gerbil-agent` pod
-- [ ] Python `MCPClient(transport="stdio", command=[...])` can list available tools
+- [ ] `smartbear-mcp` sidecar container running `mcp-proxy` wrapping `@smartbear/mcp@latest` in `gerbil-agent` pod
+- [ ] `mcp-proxy` exposes SmartBear's stdio interface as SSE on a Unix domain socket (`/shared/smartbear.sock`)
+- [ ] Python `MCPClient(transport="sse", url="unix:///shared/smartbear.sock/sse")` can list available tools
 - [ ] `smartbear/list_errors` with filter `app.release_stage = "production"` returns errors for project `543ce4797765623fb900011d`
 - [ ] Bugsnag auth token loaded via `smartbear-mcp-secret`
+- [ ] Custom bridge image (`smartbear-mcp-bridge`) built and published to `ghcr.io/topicusonderwijs/`
 
 **Technical tasks:**
-- Add sidecar container spec to `gerbil-agent` Deployment
-- Implement stdio bridge (direct subprocess spawn from Python MCP SDK)
+- Build `smartbear-mcp-bridge` Docker image (node:22-slim + mcp-proxy + @smartbear/mcp)
+- Add sidecar container spec to `gerbil-agent` Deployment with shared `emptyDir` volume
 - Write integration test covering both `"production"` and `"productie"` release stage filter variants
+- See [`ADR-005`](./09-adr/adr-005-smartbear-stdio-bridge.md) for bridge design rationale
 
 ---
 
@@ -357,7 +381,7 @@ Epic 9: Hardening           ← health checks, scaling, security audit
 **So that** the report correctly attributes errors and metrics to the actual deployment window
 
 **Acceptance criteria:**
-- [ ] Agent posts specific questions about deployment time (CET + timezone), platform change, rollbackss
+- [ ] Agent posts specific questions about deployment time (CET + timezone), platform change, rollbacks
 - [ ] Operator's answers are parsed and stored in `DeploymentTimeline` state field
 - [ ] `deployment_timeline` is written as a header in every research file
 - [ ] If operator skips the question, run is paused with a reminder (not auto-filled with GitHub release date)
@@ -592,16 +616,42 @@ Epic 9: Hardening           ← health checks, scaling, security audit
 
 ### US-9.4 — Automated spike: verify MCP SSE transport
 
-**As a developer**  
-**I want** to verify before implementation that both Grafana and GitHub MCP servers support the expected SSE port and flags  
-**So that** [`ADR-001`](./09-adr/adr-001-mcp-transport.md) assumptions are validated before the team invests in Epic 2
+> **Moved to Epic 2 as US-2.0** — see [US-2.0](#us-20--spike-verify-mcp-sse-transport-sprint-0-prerequisite) above. Retained here as a redirect for traceability.
+
+---
+
+### US-9.5 — Concurrency limiter
+
+**As** an operator  
+**I want** the bot to enforce a maximum of 2 concurrent runs per channel  
+**So that** Slack is not flooded with parallel approval prompts and progress updates
 
 **Acceptance criteria:**
-- [ ] Spike result document created confirming or correcting the SSE port/flags for `mcp/grafana`
-- [ ] Spike result document confirming or correcting `--transport sse` for `@modelcontextprotocol/server-github`
-- [ ] If either server does not support SSE, ADR-001 is updated and the affected server implementation plan revised
-- [ ] Spike completed before Epic 2 stories are pulled into a sprint
+- [ ] Third concurrent run in the same channel is queued with estimated wait time posted to Slack
+- [ ] Queued runs auto-start when a slot becomes available
+- [ ] `@gerbil status` shows queued runs with position in queue
+- [ ] Token-intensive runs (session-wide consent active) run as a singleton — max 1 concurrent
 
 **Technical tasks:**
-- `docker run mcp/grafana --help` and `docker run mcp/grafana -t sse` in a local environment
-- `npx @modelcontextprotocol/server-github --help` in a local environment
+- Implement in-process run queue keyed by `slack_channel`
+- Add queue status to `@gerbil status` output
+- Write unit tests for queue edge cases (cancel-while-queued, pod-restart-with-queue)
+
+---
+
+### US-9.6 — Prometheus metrics export
+
+**As** an ops engineer  
+**I want** the `gerbil-agent` to export Prometheus metrics at `/metrics`  
+**So that** I can track agent activity, performance, and cost in the cluster's monitoring stack
+
+**Acceptance criteria:**
+- [ ] `/metrics` endpoint exposed from `gerbil-agent` on port 3000 (alongside `/health`)
+- [ ] Metrics exported: `gerbil_runs_total` (counter, by intent + status), `gerbil_phase_duration_seconds` (histogram, by phase), `gerbil_tool_calls_total` (counter, by server + tool + decision), `gerbil_tokens_consumed_total` (counter, estimated), `gerbil_approval_latency_seconds` (histogram)
+- [ ] Grafana dashboard or ServiceMonitor manifest provided for the `gerbil` namespace
+- [ ] Token cost tracking aggregated per run and visible in `@gerbil status` output
+
+**Technical tasks:**
+- Add `prometheus_client` Python library to `gerbil-agent`
+- Instrument `execute_mcp_tool`, phase node transitions, and LLM calls
+- Write ServiceMonitor manifest for Prometheus Operator scraping

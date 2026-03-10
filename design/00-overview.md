@@ -158,7 +158,7 @@ A **LangGraph-based orchestration service** running in Kubernetes that:
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| MCP transport | Hybrid (HTTP/SSE where supported, stdio sidecar otherwise) | Grafana MCP natively supports `-t sse`; SmartBear npx is stdio-only |
+| MCP transport | Hybrid (HTTP/SSE where supported, stdio sidecar via mcp-proxy otherwise) | Grafana and GitHub MCP support SSE natively; SmartBear stdio is bridged via mcp-proxy on a Unix domain socket (see [ADR-005](./09-adr/adr-005-smartbear-stdio-bridge.md)) |
 | LLM provider | Provider-agnostic (abstracted behind LangChain `BaseChatModel`) | Avoids lock-in; allows Azure OpenAI, Anthropic, or OpenAI swap without graph changes |
 | Slack approval | Clarification loop → plan approval → per-tool-call approval (session-wide delegation available) | Maximum human control; compliant for regulated education data |
 | Artifact storage | Hybrid: Git (`rapports/`) + Slack (summaries + links) | Preserves audit trail and existing workflow discipline |
@@ -183,7 +183,7 @@ Full ADRs for each decision: [`09-adr/`](./09-adr/).
 | [`06-docs-qa-subsystem.md`](./06-docs-qa-subsystem.md) | Retrieval system, adapter contract, MVP source |
 | [`07-kubernetes.md`](./07-kubernetes.md) | K8s production topology and resource model |
 | [`08-security.md`](./08-security.md) | Secrets, RBAC, network policies, data handling |
-| [`09-adr/`](./09-adr/) | Architecture Decision Records |
+| [`09-adr/`](./09-adr/) | Architecture Decision Records (ADR-001 through ADR-005) |
 | [`10-user-stories.md`](./10-user-stories.md) | Epics, user stories, acceptance criteria |
 
 ---
